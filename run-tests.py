@@ -21,15 +21,25 @@ interp_dict = {
     'patch_instructions': interp_x86,
 }
 
-if False:
-    run_one_test(os.getcwd() + '/tests/var/zero.py',
-                 'var',
-                 compiler,
-                 'var',
-                 typecheck_dict,
-                 interp_dict)
-else:
-    run_tests('var', compiler, 'var',
-              typecheck_dict,
-              interp_dict)
+from utils import enable_tracing
+enable_tracing()
+
+run_one_test(os.getcwd() + '/tests/var/var_test_1.py',
+                'var',
+                compiler,
+                'var',
+                typecheck_dict,
+                interp_dict)
+
+# if False:
+#     run_one_test(os.getcwd() + '/tests/var/zero.py',
+#                  'var',
+#                  compiler,
+#                  'var',
+#                  typecheck_dict,
+#                  interp_dict)
+# else:
+#     run_tests('var', compiler, 'var',
+#               typecheck_dict,
+#               interp_dict)
 
