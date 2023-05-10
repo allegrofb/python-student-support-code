@@ -239,14 +239,6 @@ class Compiler:
     def patch_instr(self, i: instr) -> List[instr]:
         # YOUR CODE HERE
         match i:
-            # case Instr('movq', [deref1,deref2]):
-            #     if isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
-            #         instrs = []
-            #         instrs.append(Instr('movq', [deref1,Reg('rax')]))
-            #         instrs.append(Instr('movq', [Reg('rax'),deref2]))
-            #         return instrs
-            #     else:
-            #         return [i]
             case Instr(name, [deref1,deref2]):
                 if isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
                     instrs = []
@@ -302,4 +294,4 @@ class Compiler:
                 instrs.append(Instr('retq', []))
                 return X86Program(instrs)
             case _:
-                raise Exception('error in patch_instructions, unexpected ' + repr(p))
+                raise Exception('error in prelude_and_conclusion, unexpected ' + repr(p))
