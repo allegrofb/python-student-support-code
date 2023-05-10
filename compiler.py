@@ -25,8 +25,6 @@ class Compiler:
             case Call(Name('input_int'), []):
                 return Call(Name('input_int'), []), []
             case BinOp(left, Add(), right):
-                # if not need_atomic:
-                #     return BinOp(left, Add(), right), []
                 tmpVars = []
                 if not isinstance(left, (Name, Constant,)):
                     left2, tmp = self.rco_exp(left, need_atomic=False)
@@ -38,10 +36,13 @@ class Compiler:
                     tmpVars.extend(tmp)
                     right = Name(generate_name('tmpVar'))                        
                     tmpVars.append((right, right2))
-                return BinOp(left, Add(), right), tmpVars
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, BinOp(left, Add(), right)))
+                    return tmp, tmpVars
+                else:
+                    return BinOp(left, Add(), right), tmpVars
             case BinOp(left, Sub(), right):
-                # if not need_atomic:
-                #     return BinOp(left, Sub(), right), []
                 tmpVars = []
                 if not isinstance(left, (Name, Constant,)):
                     left2, tmp = self.rco_exp(left, need_atomic=False)
@@ -53,17 +54,25 @@ class Compiler:
                     tmpVars.extend(tmp)
                     right = Name(generate_name('tmpVar'))
                     tmpVars.append((right, right2))
-                return BinOp(left, Sub(), right), tmpVars
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, BinOp(left, Sub(), right)))
+                    return tmp, tmpVars
+                else:
+                    return BinOp(left, Sub(), right), tmpVars
             case UnaryOp(USub(), v):
-                # if not need_atomic:
-                #     return UnaryOp(USub(), v), []
                 tmpVars = []
                 if not isinstance(v, (Name, Constant,)):
                     v2, tmp = self.rco_exp(v, need_atomic=False)
                     tmpVars.extend(tmp)
                     v = Name(generate_name('tmpVar'))
                     tmpVars.append((v, v2))
-                return UnaryOp(USub(), v), tmpVars
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, UnaryOp(USub(), v)))
+                    return tmp, tmpVars
+                else:
+                    return UnaryOp(USub(), v), tmpVars
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(s))
 
@@ -71,7 +80,6 @@ class Compiler:
         # YOUR CODE HERE
         match s:
             case Assign([Name(id)], value):
-                # import pdb;pdb.set_trace()
                 stmts = []
                 value, tmp = self.rco_exp(value, need_atomic=False)
                 for i in tmp:
@@ -83,9 +91,7 @@ class Compiler:
                 arg, tmp = self.rco_exp(arg, need_atomic=True)
                 for i in tmp:
                     stmts.append(Assign([i[0]], i[1]))
-                tmp = Name(generate_name('tmpVar'))
-                stmts.append(Assign([tmp], arg))
-                stmts.append(Expr(Call(Name('print'), [tmp])))
+                stmts.append(Expr(Call(Name('print'), [arg])))
                 return stmts
             case Expr(value):
                 stmts = []
@@ -233,11 +239,19 @@ class Compiler:
     def patch_instr(self, i: instr) -> List[instr]:
         # YOUR CODE HERE
         match i:
-            case Instr('movq', [deref1,deref2]):
+            # case Instr('movq', [deref1,deref2]):
+            #     if isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
+            #         instrs = []
+            #         instrs.append(Instr('movq', [deref1,Reg('rax')]))
+            #         instrs.append(Instr('movq', [Reg('rax'),deref2]))
+            #         return instrs
+            #     else:
+            #         return [i]
+            case Instr(name, [deref1,deref2]):
                 if isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
                     instrs = []
                     instrs.append(Instr('movq', [deref1,Reg('rax')]))
-                    instrs.append(Instr('movq', [Reg('rax'),deref2]))
+                    instrs.append(Instr(name, [Reg('rax'),deref2]))
                     return instrs
                 else:
                     return [i]

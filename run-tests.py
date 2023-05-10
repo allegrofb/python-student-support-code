@@ -24,7 +24,7 @@ interp_dict = {
 from utils import enable_tracing
 enable_tracing()
 
-run_one_test(os.getcwd() + '/tests/var/var_test_1.py',
+run_one_test(os.getcwd() + '/tests/var/var_test_5.py',
                 'var',
                 compiler,
                 'var',
