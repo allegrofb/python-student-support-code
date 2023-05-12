@@ -1,5 +1,5 @@
 import os
-import compiler
+import compiler_register_allocator as compiler
 import interp_Lvar
 import type_check_Lvar
 from utils import run_tests, run_one_test
