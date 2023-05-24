@@ -53,7 +53,6 @@ class Compiler(compiler.Compiler):
                 instr_dict = {}
                 after = set()
                 for i in reversed(body):
-                    # import pdb;pdb.set_trace()
                     instr_dict[i] = after
                     r = self.read_vars(i)
                     w = self.write_vars(i)
