@@ -144,29 +144,35 @@ class Compiler:
                 else:
                     return Compare(left, [cmp], right), tmpVars
             case IfExp(test, body, orelse):
-                return IfExp(test, body, orelse), []
                 # tmpVars = []
-                # if not isinstance(test, (Name, Constant,)):
-                #     test2, tmp = self.rco_exp(test, need_atomic=False)
-                #     tmpVars.extend(tmp)
-                #     test = Name(generate_name('tmpVar'))
-                #     tmpVars.append((test, test2))
-                # if not isinstance(body, (Name, Constant,)):
-                #     body2, tmp = self.rco_exp(body, need_atomic=need_atomic)
-                #     tmpVars.extend(tmp)
-                #     body = Name(generate_name('tmpVar'))
-                #     tmpVars.append((body, body2))
-                # if not isinstance(orelse, (Name, Constant,)):
-                #     orelse2, tmp = self.rco_exp(orelse, need_atomic=need_atomic)
-                #     tmpVars.extend(tmp)
-                #     orelse = Name(generate_name('tmpVar'))
-                #     tmpVars.append((orelse, orelse2))
                 # if need_atomic:
                 #     tmp = Name(generate_name('tmpVar'))
                 #     tmpVars.append((tmp, IfExp(test, body, orelse)))
                 #     return tmp, tmpVars
                 # else:
                 #     return IfExp(test, body, orelse), tmpVars
+
+                # branch have side-effect code, insert Begin expr
+                tmpVars = []
+                if not isinstance(body, (Name, Constant,)):
+                    body2, tmp = self.rco_exp(body, need_atomic=False)
+                    stmts = []
+                    for i in tmp:
+                        stmts.append(Assign([i[0]], i[1]))
+                    body = Begin(stmts,body2)
+                if not isinstance(orelse, (Name, Constant,)):
+                    orelse2, tmp = self.rco_exp(orelse, need_atomic=False)
+                    stmts = []
+                    for i in tmp:
+                        stmts.append(Assign([i[0]], i[1]))
+                    orelse = Begin(stmts,orelse2)
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, IfExp(test, body, orelse)))
+                    return tmp, tmpVars
+                else:
+                    return IfExp(test, body, orelse), tmpVars
+
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(s))
 
@@ -221,7 +227,96 @@ class Compiler:
                 return Module(new_body)
             case _:
                 raise Exception('error in remove_complex_operands, unexpected ' + repr(p))
-        
+
+    ############################################################################
+    # Explicate Control
+    ############################################################################
+
+    def create_block(self, stmts, basic_blocks):
+        label = label_name(generate_name('block'))
+        basic_blocks[label] = stmts
+        return Goto(label)
+
+    def explicate_effect(self, e, cont, basic_blocks):
+        match e:
+            case IfExp(test, body, orelse):
+                body = self.explicate_effect(body, cont, basic_blocks)
+                orelse = self.explicate_effect(orelse, cont, basic_blocks)
+                return self.explicate_pred(test, body, orelse, basic_blocks) + cont
+            case Call(func, args):
+            # case Call(Name('input_int'), args):
+                # for arg in args:
+                #     self.explicate_effect(arg, cont, basic_blocks)
+                return [Expr(Call(func, args))] + cont
+            case Begin(body, result):
+                bb = []
+                for s in body:
+                    bb.extend(self.explicate_stmt(s, [], basic_blocks))
+                return self.explicate_effect(result, cont, basic_blocks) + bb + cont
+            case _:
+                return [e] + cont
+                
+    def explicate_assign(self, rhs, lhs, cont, basic_blocks):
+        match rhs:
+            case IfExp(test, body, orelse):
+                if not isinstance(test, Constant):
+                    goto = self.create_block(cont, basic_blocks)
+                    body = [Assign([lhs], body), goto] 
+                    orelse = [Assign([lhs], orelse), goto] 
+                    return self.explicate_pred(test, body, orelse, basic_blocks)
+                else:
+                    body = [Assign([lhs], body)] 
+                    orelse = [Assign([lhs], orelse)] 
+                    return self.explicate_pred(test, body, orelse, basic_blocks) + cont
+            case Begin(body, result):
+                raise Exception("Begin")
+            case _:
+                return [Assign([lhs], rhs)] + cont
+                
+    def explicate_pred(self, cnd, thn, els, basic_blocks):
+        match cnd:
+            case Compare(left, [op], [right]):
+                goto_thn = self.create_block(thn, basic_blocks)
+                goto_els = self.create_block(els, basic_blocks)
+                return [If(cnd, [goto_thn], [goto_els])]
+            case Constant(True):
+                return thn
+            case Constant(False):
+                return els
+            case UnaryOp(Not(), operand):
+                return self.explicate_pred(operand, els, thn, basic_blocks)
+            case IfExp(test, body, orelse):
+                goto_thn = self.create_block(thn, basic_blocks)
+                goto_els = self.create_block(els, basic_blocks)
+                body = [If(body, [goto_thn], [goto_els])]        # body and orelse won't be IfExp
+                orelse = [If(orelse, [goto_thn], [goto_els])]
+                return self.explicate_pred(test, body, orelse, basic_blocks)
+            case Begin(body, result):
+                raise Exception("Begin")
+            case _:
+                return [If(Compare(cnd, [Eq()], [Constant(False)]),
+                        [self.create_block(els, basic_blocks)],
+                        [self.create_block(thn, basic_blocks)])]
+
+    def explicate_stmt(self, s, cont, basic_blocks):
+        match s:
+            case Assign([lhs], rhs):
+                return self.explicate_assign(rhs, lhs, cont, basic_blocks)
+            case Expr(value):
+                return self.explicate_effect(value, cont, basic_blocks)
+            case If(test, body, orelse):
+                raise Exception("If")
+                
+    def explicate_control(self, p):
+        match p:
+            case Module(body):
+                new_body = [Return(Constant(0))]
+                basic_blocks = {}
+                for s in reversed(body):
+                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                basic_blocks[label_name('start')] = new_body
+                print(basic_blocks)
+                return CProgram(basic_blocks)
 
     ############################################################################
     # Select Instructions
