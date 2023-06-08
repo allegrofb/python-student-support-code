@@ -223,7 +223,7 @@ class Compiler:
                 new_body = []
                 for stmt in body:
                     new_body.extend(self.rco_stmt(stmt))
-                print(new_body)
+                # print(new_body)
                 return Module(new_body)
             case _:
                 raise Exception('error in remove_complex_operands, unexpected ' + repr(p))
@@ -249,10 +249,9 @@ class Compiler:
                 #     self.explicate_effect(arg, cont, basic_blocks)
                 return [Expr(Call(func, args))] + cont
             case Begin(body, result):
-                bb = []
                 for s in body:
-                    bb.extend(self.explicate_stmt(s, [], basic_blocks))
-                return self.explicate_effect(result, cont, basic_blocks) + bb + cont
+                    cont.extend(self.explicate_stmt(s, [], basic_blocks))
+                return result
             case _:
                 return [e] + cont
                 
@@ -261,8 +260,14 @@ class Compiler:
             case IfExp(test, body, orelse):
                 if not isinstance(test, Constant):
                     goto = self.create_block(cont, basic_blocks)
-                    body = [Assign([lhs], body), goto] 
-                    orelse = [Assign([lhs], orelse), goto] 
+                    cont = []
+                    if not isinstance(body, Constant):
+                        body = self.explicate_effect(body, cont, basic_blocks)
+                    body = cont + [Assign([lhs], body)] + [goto] 
+                    cont = []
+                    if not isinstance(orelse, Constant):
+                        orelse = self.explicate_effect(orelse, cont, basic_blocks)
+                    orelse = cont + [Assign([lhs], orelse)] + [goto] 
                     return self.explicate_pred(test, body, orelse, basic_blocks)
                 else:
                     body = [Assign([lhs], body)] 
@@ -315,7 +320,7 @@ class Compiler:
                 for s in reversed(body):
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 basic_blocks[label_name('start')] = new_body
-                print(basic_blocks)
+                # print(basic_blocks)
                 return CProgram(basic_blocks)
 
     ############################################################################
@@ -330,7 +335,7 @@ class Compiler:
             case Constant(v):
                 return Immediate(int(v))
             case _:
-                raise Exception('error in select_arg, unexpected ' + repr(s))
+                raise Exception('error in select_arg, unexpected ' + repr(e))
 
     def select_stmt(self, s: stmt) -> List[instr]:
         # YOUR CODE HERE
@@ -365,6 +370,12 @@ class Compiler:
                         instrs.append(Instr('movq', [self.select_arg(v), self.select_arg(arg)]))
                         instrs.append(Instr('negq', [self.select_arg(arg)]))
                         return instrs
+                    case Begin(body, result):
+                        instrs = []
+                        for i in body:
+                            instrs.extend(self.select_stmt(i))
+                        instrs.append(Instr('movq', [self.select_arg(result), self.select_arg(arg)]))
+                        return instrs
                     case _:
                         raise Exception('error in select_stmt, unexpected ' + repr(s))
                 return
@@ -377,17 +388,55 @@ class Compiler:
                 instrs = []
                 instrs.extend(self.select_stmt(value))
                 return instrs
+            case Return(arg):
+                instrs = []
+                instrs.append(Instr('movq', [self.select_arg(arg), Reg('rax')]))
+                # instrs.append(Jump(label_name("main")))
+                return instrs
+            case Goto(label):
+                instrs = []
+                instrs.append(Jump(label_name(label)))
+                return instrs
+            # case If(test, body, orelse):
+            case If(test, [Goto(label1)], [Goto(label2)]):
+                match test:
+                    case Compare(left, [cmp], [right]):
+                        instrs = []
+                        instrs.append(Instr('cmpq', [self.select_arg(left), self.select_arg(right)]))
+                        if isinstance(cmp,(Lt,)):
+                            instrs.append(JumpIf('l',label_name(label1)))
+                        elif isinstance(cmp,(LtE,)):
+                            instrs.append(JumpIf('le',label_name(label1)))
+                        elif isinstance(cmp,(Gt,)):
+                            instrs.append(JumpIf('g',label_name(label1)))
+                        elif isinstance(cmp,(GtE,)):
+                            instrs.append(JumpIf('ge',label_name(label1)))
+                        elif isinstance(cmp,(Eq,)):
+                            instrs.append(JumpIf('e',label_name(label1)))
+                        elif isinstance(cmp,(NotEq,)):
+                            instrs.append(JumpIf('ne',label_name(label1)))
+                        else:
+                            raise Exception('error in Compare, unexpected ' + repr(cmp))
+                        instrs.append(Jump(label_name(label2)))
+                        return instrs
+                    case UnaryOp(Not(), v):
+                        instrs = []
+                        instrs.append(Instr('xorq', [Immediate(1), self.select_arg(v)]))
+                        return instrs
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
 
-    def select_instructions(self, p: Module) -> X86Program:
+    def select_instructions(self, p: CProgram) -> X86Program:
         # YOUR CODE HERE
         match p:
-            case Module(body):
-                instrs = []
-                for stmt in body:
-                    instrs.extend(self.select_stmt(stmt))
-                return X86Program(instrs)
+            case CProgram(body):
+                result = dict()
+                for l,stmts in body.items():
+                    instrs = []
+                    for stmt in stmts:
+                        instrs.extend(self.select_stmt(stmt))
+                    result[l] = instrs
+                return X86Program(result)
             case _:
                 raise Exception('error in select_instructions, unexpected ' + repr(p))
 
