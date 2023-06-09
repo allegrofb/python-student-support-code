@@ -141,6 +141,8 @@ class Compiler(compiler.Compiler):
                             arg = Reg('rbx')
                         else:
                             arg = Deref('rbp',-(color[arg]-1)*8)
+                    # elif isinstance(arg, Variable):
+                    #     arg = Reg('rcx')
                     instrs.append(Instr(name,[arg]))
                 case Instr(name, [arg1,arg2]):
                     if arg1 in color:
@@ -150,6 +152,8 @@ class Compiler(compiler.Compiler):
                             arg1 = Reg('rbx')
                         else:
                             arg1 = Deref('rbp',-(color[arg1]-1)*8)
+                    # elif isinstance(arg1, Variable):
+                    #     arg1 = Reg('rcx')
                     if arg2 in color:
                         if color[arg2] == 0:
                             arg2 = Reg('rcx')
@@ -157,6 +161,8 @@ class Compiler(compiler.Compiler):
                             arg2 = Reg('rbx')
                         else:
                             arg2 = Deref('rbp',-(color[arg2]-1)*8)
+                    # elif isinstance(arg2, Variable):
+                    #     arg2 = Reg('rcx')
                     instrs.append(Instr(name,[arg1,arg2]))
                 case _:
                     instrs.append(i)                            
@@ -172,10 +178,10 @@ class Compiler(compiler.Compiler):
     def assign_homes(self, pseudo_x86: X86Program) -> X86Program:
         # YOUR CODE HERE
         live_after = self.uncover_live(pseudo_x86)
-        # for k,v in live_after.items():
-        #     print(k,v)
+        for k,v in live_after.items():
+            print(k,v)
         graph = self.build_interference(pseudo_x86, live_after)
-        # print(graph.show())
+        print(graph.show())
         return self.allocate_registers(pseudo_x86, graph)
 
     ###########################################################################

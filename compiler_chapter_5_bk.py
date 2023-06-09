@@ -140,10 +140,10 @@ class Compiler:
                     tmpVars.append((right, right2))
                 if need_atomic:
                     tmp = Name(generate_name('tmpVar'))
-                    tmpVars.append((tmp, Compare(left, [cmp], [right])))
+                    tmpVars.append((tmp, Compare(left, [cmp], right)))
                     return tmp, tmpVars
                 else:
-                    return Compare(left, [cmp], [right]), tmpVars
+                    return Compare(left, [cmp], right), tmpVars
             case IfExp(test, body, orelse):
                 # tmpVars = []
                 # if need_atomic:
@@ -154,9 +154,9 @@ class Compiler:
                 #     return IfExp(test, body, orelse), tmpVars
 
                 tmpVars = []
-                if not isinstance(test, (Name, Constant,)):
-                    test, tmp = self.rco_exp(test, need_atomic=False)
-                    tmpVars.extend(tmp)
+                # if not isinstance(test, (Name, Constant,)):
+                #     test, tmp = self.rco_exp(test, need_atomic=False)
+                #     tmpVars.extend(tmp)
                 if not isinstance(body, (Name, Constant,)):  # branch have side-effect code, insert Begin expr
                     body2, tmp = self.rco_exp(body, need_atomic=False) # it's ok for need_atomic=True ?
                     stmts = []
@@ -226,7 +226,7 @@ class Compiler:
                 new_body = []
                 for stmt in body:
                     new_body.extend(self.rco_stmt(stmt))
-                # print(new_body)
+                print(new_body)
                 return Module(new_body)
             case _:
                 raise Exception('error in remove_complex_operands, unexpected ' + repr(p))
@@ -405,7 +405,7 @@ class Compiler:
                 match test:
                     case Compare(left, [cmp], [right]):
                         instrs = []
-                        instrs.append(Instr('cmpq', [self.select_arg(right), self.select_arg(left)]))
+                        instrs.append(Instr('cmpq', [self.select_arg(left), self.select_arg(right)]))
                         if isinstance(cmp,(Lt,)):
                             instrs.append(JumpIf('l',label_name(label1)))
                         elif isinstance(cmp,(LtE,)):
@@ -454,13 +454,6 @@ class Compiler:
                 return set()
             case JumpIf(e, label):
                 return set()
-            case Instr('cmpq', args):
-                result = set()
-                if not isinstance(args[0],(Immediate,)):
-                    result.add(args[0])
-                if not isinstance(args[-1],(Immediate,)):
-                    result.add(args[-1])
-                return result                    
             case Instr('addq', args):
                 if not isinstance(args[0],(Immediate,)):
                     return {args[0],args[-1]}
@@ -487,8 +480,6 @@ class Compiler:
             case Jump(label):
                 return set()
             case JumpIf(e, label):
-                return set()
-            case Instr('cmpq', args):
                 return set()
             case Callq(name, num):
                 return {Reg(n) for n in 'rax rcx rdx rsi rdi r8 r9 r10 r11'.split(' ')}
@@ -602,7 +593,7 @@ class Compiler:
         var = graph.vertices()
         # print(var)
         color, var = self.color_graph(graph, var)
-        print(color)
+        # print(color)
         body = {}
         for l, ss in p.body.items():
             instrs = []
@@ -653,10 +644,10 @@ class Compiler:
     def assign_homes(self, pseudo_x86: X86Program) -> X86Program:
         # YOUR CODE HERE
         live_after = self.uncover_live(pseudo_x86)
-        for k,v in live_after.items():
-            print(k,v)
+        # for k,v in live_after.items():
+        #     print(k,v)
         graph = self.build_interference(pseudo_x86, live_after)
-        print(graph.show())
+        # print(graph.show())
         return self.allocate_registers(pseudo_x86, graph)
 
     ###########################################################################
