@@ -5,8 +5,8 @@ main:
     pushq %rbx
     subq $16, %rsp
     callq read_int
-    movq %rbx, y
-    movq y, %rcx
+    movq %rax, %rcx
+    movq %rcx, %rdi
     callq print_int
     addq $16, %rsp
     popq %rbx

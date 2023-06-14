@@ -24,12 +24,24 @@ interp_dict = {
 from utils import enable_tracing
 enable_tracing()
 
-run_one_test(os.getcwd() + '/tests/var/var_test_6.py',
+# run_one_test(os.getcwd() + '/tests/var/var_test_4.py',
+#                 'var',
+#                 compiler,
+#                 'var',
+#                 typecheck_dict,
+#                 interp_dict)
+
+run_one_test(os.getcwd() + '/tests/var/input.py',
                 'var',
                 compiler,
                 'var',
                 typecheck_dict,
                 interp_dict)
+
+
+# run_tests('var', compiler, 'var',
+#             typecheck_dict,
+#             interp_dict)
 
 # if False:
 #     run_one_test(os.getcwd() + '/tests/var/zero.py',

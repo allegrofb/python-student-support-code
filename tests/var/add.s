@@ -4,7 +4,8 @@ main:
     movq %rsp, %rbp
     pushq %rbx
     subq $16, %rsp
-    movq $42, %rcx
+    movq $40, %rcx
+    addq $2, %rcx
     movq %rcx, %rdi
     callq print_int
     addq $16, %rsp

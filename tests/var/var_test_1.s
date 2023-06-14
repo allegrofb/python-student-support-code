@@ -4,12 +4,11 @@ main:
     movq %rsp, %rbp
     pushq %rbx
     subq $16, %rsp
-    movq $1, %rbx
-    movq $42, %rcx
-    addq $7, %rbx
-    movq %rbx, -8(%rbp)
-    addq %rcx, -8(%rbp)
-    movq %rbx, %rcx
+    movq $1, %rcx
+    movq $42, %rbx
+    addq $7, %rcx
+    movq %rcx, -8(%rbp)
+    addq %rbx, -8(%rbp)
     negq %rcx
     movq -8(%rbp), %rbx
     addq %rcx, %rbx

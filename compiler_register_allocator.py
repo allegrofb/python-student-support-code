@@ -73,14 +73,18 @@ class Compiler(compiler.Compiler):
         for i in p.body:
             match i:
                 case Instr('movq', [s,d]):
+                    # print('movq',s,d,live_after[i])
                     for v in live_after[i]:
                         if v != s and v != d:
+                            # print('add_edge')
                             graph.add_edge(d,v)
                 case _:
+                    # print('other',i)
                     w = self.write_vars(i)
                     for d in w:
                         for v in live_after[i]:
                             if d != v:
+                                # print('add_edge',d,v)
                                 graph.add_edge(d,v)
         return graph
 
@@ -106,6 +110,8 @@ class Compiler(compiler.Compiler):
         while not Q.empty():
             # print(Q)
             k = Q.pop()
+            if k in {Reg(n) for n in 'rax rcx rdx rsi rdi r8 r9 r10 r11 rbx r12 r13 r14 rsp rbp r15'.split(' ')}:
+                continue
             adj_k = graph.adjacent(k)
             color_list = []
             for i in adj_k:
@@ -139,10 +145,10 @@ class Compiler(compiler.Compiler):
                             arg = Reg('rcx')
                         elif color[arg] == 1:
                             arg = Reg('rbx')
-                        else:
+                        elif color[arg] > 1:
                             arg = Deref('rbp',-(color[arg]-1)*8)
-                    # elif isinstance(arg, Variable):
-                    #     arg = Reg('rcx')
+                    elif isinstance(arg, Variable):
+                        arg = Reg('rcx')
                     instrs.append(Instr(name,[arg]))
                 case Instr(name, [arg1,arg2]):
                     if arg1 in color:
@@ -150,19 +156,19 @@ class Compiler(compiler.Compiler):
                             arg1 = Reg('rcx')
                         elif color[arg1] == 1:
                             arg1 = Reg('rbx')
-                        else:
+                        elif color[arg1] > 1:
                             arg1 = Deref('rbp',-(color[arg1]-1)*8)
-                    # elif isinstance(arg1, Variable):
-                    #     arg1 = Reg('rcx')
+                    elif isinstance(arg1, Variable):
+                        arg1 = Reg('rcx')
                     if arg2 in color:
                         if color[arg2] == 0:
                             arg2 = Reg('rcx')
                         elif color[arg2] == 1:
                             arg2 = Reg('rbx')
-                        else:
+                        elif color[arg2] > 1:
                             arg2 = Deref('rbp',-(color[arg2]-1)*8)
-                    # elif isinstance(arg2, Variable):
-                    #     arg2 = Reg('rcx')
+                    elif isinstance(arg2, Variable):
+                        arg2 = Reg('rcx')
                     instrs.append(Instr(name,[arg1,arg2]))
                 case _:
                     instrs.append(i)                            
