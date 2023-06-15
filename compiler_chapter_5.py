@@ -76,7 +76,13 @@ class Compiler:
             case Constant(value):
                 return Constant(value), []
             case Call(Name('input_int'), []):
-                return Call(Name('input_int'), []), []
+                tmpVars = []
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, Call(Name('input_int'), [])))
+                    return tmp, tmpVars
+                else:
+                    return Call(Name('input_int'), []), tmpVars
             case BinOp(left, Add(), right):
                 tmpVars = []
                 if not isinstance(left, (Name, Constant,)):
@@ -567,32 +573,34 @@ class Compiler:
         # YOUR CODE HERE
         from priority_queue import PriorityQueue
         L = {}
-        for v in variables:
+        for v in variables: # add variables
             L[v] = []
         def less(x, y):
             return len(L[x.key]) < len(L[y.key])
         Q = PriorityQueue(less)
         for k, v in L.items():
-            Q.push(k)
+            Q.push(k)       # create priority queue
 
         color = {}
         while not Q.empty():
             # print(Q)
-            k = Q.pop()
-            adj_k = graph.adjacent(k)
+            k = Q.pop()     # pick one variable
+            if k in {Reg(n) for n in 'rax rcx rdx rsi rdi r8 r9 r10 r11 rbx r12 r13 r14 rsp rbp r15'.split(' ')}:
+                continue
+            adj_k = graph.adjacent(k) # get other interference variable
             color_list = []
             for i in adj_k:
                 if i in color:
-                    color_list.append(color[i])
+                    color_list.append(color[i]) # get already assign color
             low_color = 0
             for i in color_list:
                 if low_color in color_list:
-                    low_color += 1
-            color[k] = low_color
+                    low_color += 1    # get lowest color
+            color[k] = low_color      # assign lowest color
             for i in adj_k:
                 if low_color not in L[i]:
-                    L[i].append(low_color)
-                    Q.increase_key(i)
+                    L[i].append(low_color)  # update L
+                    Q.increase_key(i)       # update priority queue
         # print(L)
         return color, variables
 
@@ -601,8 +609,8 @@ class Compiler:
         # YOUR CODE HERE
         var = graph.vertices()
         # print(var)
-        color, var = self.color_graph(graph, var)
-        print(color)
+        color, var = self.color_graph(graph, var) # call coloring algorithm, get coloring variables
+        # print(color)
         body = {}
         for l, ss in p.body.items():
             instrs = []
@@ -614,7 +622,7 @@ class Compiler:
                                 arg = Reg('rcx')
                             elif color[arg] == 1:
                                 arg = Reg('rbx')
-                            else:
+                            elif color[arg] > 1:
                                 arg = Deref('rbp',-(color[arg]-1)*8)
                         elif isinstance(arg, Variable):
                             arg = Reg('rcx')
@@ -625,7 +633,7 @@ class Compiler:
                                 arg1 = Reg('rcx')
                             elif color[arg1] == 1:
                                 arg1 = Reg('rbx')
-                            else:
+                            elif color[arg1] > 1:
                                 arg1 = Deref('rbp',-(color[arg1]-1)*8)
                         elif isinstance(arg1, Variable):
                             arg1 = Reg('rcx')
@@ -634,7 +642,7 @@ class Compiler:
                                 arg2 = Reg('rcx')
                             elif color[arg2] == 1:
                                 arg2 = Reg('rbx')
-                            else:
+                            elif color[arg2] > 1:
                                 arg2 = Deref('rbp',-(color[arg2]-1)*8)
                         elif isinstance(arg2, Variable):
                             arg2 = Reg('rcx')
@@ -653,10 +661,10 @@ class Compiler:
     def assign_homes(self, pseudo_x86: X86Program) -> X86Program:
         # YOUR CODE HERE
         live_after = self.uncover_live(pseudo_x86)
-        for k,v in live_after.items():
-            print(k,v)
+        # for k,v in live_after.items():
+        #    print(k,v)
         graph = self.build_interference(pseudo_x86, live_after)
-        print(graph.show())
+        # print(graph.show())
         return self.allocate_registers(pseudo_x86, graph)
 
     ###########################################################################

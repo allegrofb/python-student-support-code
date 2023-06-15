@@ -4,28 +4,27 @@ main:
     movq %rsp, %rbp
     pushq %rbx
     subq $32, %rsp
-    movq $2, %rcx
-    negq %rcx
-    movq $38, %rbx
-    addq %rcx, %rbx
-    movq $2, %rcx
-    negq %rcx
-    addq %rcx, %rbx
-    movq $1, %rcx
-    addq $2, %rcx
+    movq $2, %rbx
+    negq %rbx
+    movq $38, %rcx
+    addq %rbx, %rcx
+    movq $2, %rbx
+    negq %rbx
+    addq %rbx, %rcx
+    movq $1, %rbx
+    addq $2, %rbx
     movq $1, -8(%rbp)
-    subq %rcx, -8(%rbp)
+    subq %rbx, -8(%rbp)
+    movq $1, %rbx
+    negq %rbx
     movq $1, -16(%rbp)
-    negq -16(%rbp)
-    movq $1, -24(%rbp)
-    addq $2, -24(%rbp)
-    movq $2, %rcx
-    negq %rcx
-    addq %rcx, -24(%rbp)
-    movq -16(%rbp), %rcx
-    subq -24(%rbp), %rcx
-    subq %rcx, -8(%rbp)
-    movq %rbx, %rcx
+    addq $2, -16(%rbp)
+    movq $2, -24(%rbp)
+    negq -24(%rbp)
+    movq -24(%rbp), %rax
+    addq %rax, -16(%rbp)
+    subq -16(%rbp), %rbx
+    subq %rbx, -8(%rbp)
     addq -8(%rbp), %rcx
     movq %rcx, %rdi
     callq print_int

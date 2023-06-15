@@ -37,7 +37,7 @@ enable_tracing()
 #                 typecheck_dict,
 #                 interp_dict)
 
-run_one_test(os.getcwd() + '/tests/if/if_explicate_control_6.py',
+run_one_test(os.getcwd() + '/tests/if/if_explicate_control_2.py',
                 'if',
                 compiler,
                 'if',
@@ -45,6 +45,9 @@ run_one_test(os.getcwd() + '/tests/if/if_explicate_control_6.py',
                 interp_dict)
 
 
+# run_tests('if', compiler, 'if',
+#             typecheck_dict,
+#             interp_dict)
 
 
 # if False:

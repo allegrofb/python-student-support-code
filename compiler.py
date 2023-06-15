@@ -23,7 +23,13 @@ class Compiler:
             case Constant(value):
                 return Constant(value), []
             case Call(Name('input_int'), []):
-                return Call(Name('input_int'), []), []
+                tmpVars = []
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, Call(Name('input_int'), [])))
+                    return tmp, tmpVars
+                else:
+                    return Call(Name('input_int'), []), tmpVars
             case BinOp(left, Add(), right):
                 tmpVars = []
                 if not isinstance(left, (Name, Constant,)):
