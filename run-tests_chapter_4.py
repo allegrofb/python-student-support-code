@@ -24,19 +24,19 @@ interp_dict = {
 from utils import enable_tracing
 enable_tracing()
 
-# run_one_test(os.getcwd() + '/tests/var/var_test_7.py',
-#                 'var',
-#                 compiler,
-#                 'var',
-#                 typecheck_dict,
-#                 interp_dict)
-
-run_one_test(os.getcwd() + '/tests/var/zero.py',
+run_one_test(os.getcwd() + '/tests/var/var_test_6.py',
                 'var',
                 compiler,
                 'var',
                 typecheck_dict,
                 interp_dict)
+
+# run_one_test(os.getcwd() + '/tests/var/zero.py',
+#                 'var',
+#                 compiler,
+#                 'var',
+#                 typecheck_dict,
+#                 interp_dict)
 
 
 # run_tests('var', compiler, 'var',

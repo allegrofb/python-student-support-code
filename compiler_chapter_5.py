@@ -324,8 +324,9 @@ class Compiler:
     def explicate_control(self, p: Module) -> CProgram:
         match p:
             case Module(body):
-                new_body = [Return(Constant(0))]
                 basic_blocks = {}
+                basic_blocks[label_name('conclusion')] = [Return(Constant(0))]
+                new_body = [Goto(label_name('conclusion'))]
                 for s in reversed(body):
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 basic_blocks[label_name('start')] = new_body
@@ -684,6 +685,9 @@ class Compiler:
                         elif isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
                             instrs.append(Instr('movq', [deref1,Reg('rax')]))
                             instrs.append(Instr(name, [Reg('rax'),deref2]))
+                        elif name == 'cmpq' and isinstance(deref1, (Immediate,)) and isinstance(deref2, (Immediate,)) :
+                            instrs.append(Instr('movq', [deref2,Reg('rax')]))
+                            instrs.append(Instr(name, [deref1,Reg('rax')]))
                         else:
                             instrs.append(i)
                     case _:
@@ -720,15 +724,13 @@ class Compiler:
                 instrs.append(Jump(label_name("start")))
                 body['main'] = instrs
 
-                body['start'].append(Jump(label_name("conclusion")))
-
                 instrs = []
                 instrs.append(Instr('addq', [Immediate((int(offset/16)-1)*-16),Reg('rsp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('popq', [Reg(j)]))
                 instrs.append(Instr('popq', [Reg('rbp')]))
                 instrs.append(Instr('retq', []))
-                body['conclusion'] = instrs
+                body['conclusion'] += instrs
 
                 return X86Program(body)
             case _:
