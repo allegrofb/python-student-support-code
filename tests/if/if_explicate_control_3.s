@@ -1,7 +1,7 @@
 	.align 16
 conclusion:
     movq $0, %rax
-    addq $16, %rsp
+    addq $8, %rsp
     popq %rbx
     popq %rbp
     retq 
@@ -40,7 +40,7 @@ main:
     pushq %rbp
     movq %rsp, %rbp
     pushq %rbx
-    subq $16, %rsp
+    subq $8, %rsp
     jmp start
 
 

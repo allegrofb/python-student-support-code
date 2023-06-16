@@ -4,6 +4,7 @@ from typing import List, Tuple, Set, Dict
 from ast import *
 from x86_ast import *
 from typing import Set, Dict, Tuple
+import math
 
 # Skeleton code for the chapter on Register Allocation
 
@@ -235,9 +236,10 @@ class Compiler(compiler.Compiler):
                 instrs.append(Instr('movq', [Reg('rsp'),Reg('rbp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('pushq', [Reg(j)]))
-                instrs.append(Instr('subq', [Immediate((int(offset/16)-1)*-16),Reg('rsp')]))
+                size = math.ceil(-offset / 16)*16 + (len(p.calleesaved)%2)*8
+                instrs.append(Instr('subq', [Immediate(int(size)),Reg('rsp')]))
                 instrs.extend(body)
-                instrs.append(Instr('addq', [Immediate((int(offset/16)-1)*-16),Reg('rsp')]))
+                instrs.append(Instr('addq', [Immediate(int(size)),Reg('rsp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('popq', [Reg(j)]))
                 instrs.append(Instr('popq', [Reg('rbp')]))

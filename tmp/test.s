@@ -1,18 +1,9 @@
 	.file	"test.c"
 	.text
-	.comm	fromspace_begin,8,8
-	.comm	fromspace_end,8,8
-	.comm	free_ptr,8,8
-	.comm	rootstack_begin,8,8
-	.comm	rootstack_end,8,8
-	.section	.rodata
-.LC0:
-	.string	"%ld"
-	.text
 	.globl	main
 	.type	main, @function
 main:
-.LFB5:
+.LFB0:
 	.cfi_startproc
 	pushq	%rbp
 	.cfi_def_cfa_offset 16
@@ -24,16 +15,14 @@ main:
 	call	read_int@PLT
 	movq	%rax, -8(%rbp)
 	movq	-8(%rbp), %rax
-	movq	%rax, %rsi
-	leaq	.LC0(%rip), %rdi
-	movl	$0, %eax
-	call	printf@PLT
+	movq	%rax, %rdi
+	call	print_int@PLT
 	movl	$0, %eax
 	leave
 	.cfi_def_cfa 7, 8
 	ret
 	.cfi_endproc
-.LFE5:
+.LFE0:
 	.size	main, .-main
 	.ident	"GCC: (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0"
 	.section	.note.GNU-stack,"",@progbits

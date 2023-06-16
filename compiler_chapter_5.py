@@ -5,6 +5,7 @@ from x86_ast import *
 import os
 from typing import List, Tuple, Set, Dict
 from graph import UndirectedAdjList, DirectedAdjList, topological_sort, transpose
+import math
 
 Binding = Tuple[Name, expr]
 Temporaries = List[Binding]
@@ -720,12 +721,12 @@ class Compiler:
                 instrs.append(Instr('movq', [Reg('rsp'),Reg('rbp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('pushq', [Reg(j)]))
-                instrs.append(Instr('subq', [Immediate((int(offset/16)-1)*-16),Reg('rsp')]))
+                size = math.ceil(-offset / 16)*16 + (len(p.calleesaved)%2)*8
+                instrs.append(Instr('subq', [Immediate(size),Reg('rsp')]))
                 instrs.append(Jump(label_name("start")))
                 body['main'] = instrs
-
                 instrs = []
-                instrs.append(Instr('addq', [Immediate((int(offset/16)-1)*-16),Reg('rsp')]))
+                instrs.append(Instr('addq', [Immediate(size),Reg('rsp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('popq', [Reg(j)]))
                 instrs.append(Instr('popq', [Reg('rbp')]))
