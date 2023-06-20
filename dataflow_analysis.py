@@ -19,4 +19,4 @@ def analyze_dataflow(G, transfer, bottom, join):
             mapping[node] = output
             for v in G.adjacent(node):
                 worklist.append(v)
-
+    return mapping
