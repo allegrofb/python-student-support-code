@@ -164,13 +164,13 @@ class Compiler:
                 if not isinstance(test, (Name, Constant,)):
                     test, tmp = self.rco_exp(test, need_atomic=False)
                     tmpVars.extend(tmp)
-                if not isinstance(body, (Name, Constant,)):  # branch have side-effect code, insert Begin expr
+                if not isinstance(body, (Name, Constant, Compare)):  # branch have side-effect code, insert Begin expr
                     body2, tmp = self.rco_exp(body, need_atomic=False) # it's ok for need_atomic=True ?
                     stmts = []
                     for i in tmp:
                         stmts.append(Assign([i[0]], i[1]))
                     body = Begin(stmts,body2)
-                if not isinstance(orelse, (Name, Constant,)):
+                if not isinstance(orelse, (Name, Constant, Compare)):
                     orelse2, tmp = self.rco_exp(orelse, need_atomic=False)
                     stmts = []
                     for i in tmp:
@@ -434,6 +434,8 @@ class Compiler:
                         instrs = []
                         instrs.append(Instr('xorq', [Immediate(1), self.select_arg(v)]))
                         return instrs
+                    case _:
+                        raise Exception('error in select_stmt, unexpected ' + repr(test))
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
 
@@ -445,6 +447,7 @@ class Compiler:
                 for l,stmts in body.items():
                     instrs = []
                     for stmt in stmts:
+                        # print(stmt)
                         instrs.extend(self.select_stmt(stmt))
                     result[l] = instrs
                 return X86Program(result)
@@ -519,6 +522,7 @@ class Compiler:
                     for i in v:
                         graph.add_edge(u, i)
                 vs = topological_sort(transpose(graph)) # reverse basic blocks sequence
+                # print(transpose(graph).show())
                 if len(vs) == 0:
                     vs = ['start']
                 # print(vs)
