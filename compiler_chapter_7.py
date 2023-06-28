@@ -216,12 +216,12 @@ class Compiler:
                     return Call(Name('input_int'), []), tmpVars
             case BinOp(left, Add(), right):
                 tmpVars = []
-                if not isinstance(left, (Name, Constant,)):
+                if not isinstance(left, (Name, Constant, GlobalValue, )):
                     left2, tmp = self.rco_exp(left, need_atomic=False)
                     tmpVars.extend(tmp)
                     left = Name(generate_name('tmpVar'))
                     tmpVars.append((left, left2))
-                if not isinstance(right, (Name, Constant,)):
+                if not isinstance(right, (Name, Constant, GlobalValue,)):
                     right2, tmp = self.rco_exp(right, need_atomic=False)
                     tmpVars.extend(tmp)
                     right = Name(generate_name('tmpVar'))                        
@@ -234,12 +234,12 @@ class Compiler:
                     return BinOp(left, Add(), right), tmpVars
             case BinOp(left, Sub(), right):
                 tmpVars = []
-                if not isinstance(left, (Name, Constant,)):
+                if not isinstance(left, (Name, Constant, GlobalValue,)):
                     left2, tmp = self.rco_exp(left, need_atomic=False)
                     tmpVars.extend(tmp)
                     left = Name(generate_name('tmpVar'))
                     tmpVars.append((left, left2))
-                if not isinstance(right, (Name, Constant,)):
+                if not isinstance(right, (Name, Constant, GlobalValue,)):
                     right2, tmp = self.rco_exp(right, need_atomic=False)
                     tmpVars.extend(tmp)
                     right = Name(generate_name('tmpVar'))
@@ -252,7 +252,7 @@ class Compiler:
                     return BinOp(left, Sub(), right), tmpVars
             case UnaryOp(USub(), v):
                 tmpVars = []
-                if not isinstance(v, (Name, Constant,)):
+                if not isinstance(v, (Name, Constant, GlobalValue,)):
                     v2, tmp = self.rco_exp(v, need_atomic=False)
                     tmpVars.extend(tmp)
                     v = Name(generate_name('tmpVar'))
@@ -265,12 +265,12 @@ class Compiler:
                     return UnaryOp(USub(), v), tmpVars
             case Compare(left, [cmp], [right]):
                 tmpVars = []
-                if not isinstance(left, (Name, Constant,)):
+                if not isinstance(left, (Name, Constant, GlobalValue,)):
                     left2, tmp = self.rco_exp(left, need_atomic=True)
                     tmpVars.extend(tmp)
                     left = Name(generate_name('tmpVar'))
                     tmpVars.append((left, left2))
-                if not isinstance(right, (Name, Constant,)):
+                if not isinstance(right, (Name, Constant, GlobalValue,)):
                     right2, tmp = self.rco_exp(right, need_atomic=True)
                     tmpVars.extend(tmp)
                     right = Name(generate_name('tmpVar'))
@@ -291,16 +291,16 @@ class Compiler:
                 #     return IfExp(test, body, orelse), tmpVars
 
                 tmpVars = []
-                if not isinstance(test, (Name, Constant,)):
+                if not isinstance(test, (Name, Constant, GlobalValue,)):
                     test, tmp = self.rco_exp(test, need_atomic=False)
                     tmpVars.extend(tmp)
-                if not isinstance(body, (Name, Constant, Compare)):  # branch have side-effect code, insert Begin expr
+                if not isinstance(body, (Name, Constant,  GlobalValue, Compare,)):  # branch have side-effect code, insert Begin expr
                     body2, tmp = self.rco_exp(body, need_atomic=False) # it's ok for need_atomic=True ?
                     stmts = []
                     for i in tmp:
                         stmts.append(Assign([i[0]], i[1]))
                     body = Begin(stmts,body2)
-                if not isinstance(orelse, (Name, Constant, Compare)):
+                if not isinstance(orelse, (Name, Constant,  GlobalValue, Compare,)):
                     orelse2, tmp = self.rco_exp(orelse, need_atomic=False)
                     stmts = []
                     for i in tmp:
@@ -324,18 +324,12 @@ class Compiler:
                 return Begin(stmts, result), tmpVars
             case Subscript(tup, Constant(index), Load()):
                 tmpVars = []
-                # if not isinstance(v, (Name, Constant,)):
-                #     v2, tmp = self.rco_exp(v, need_atomic=False)
-                #     tmpVars.extend(tmp)
-                #     v = Name(generate_name('tmpVar'))
-                #     tmpVars.append((v, v2))
-                # if need_atomic:
-                #     tmp = Name(generate_name('tmpVar'))
-                #     tmpVars.append((tmp, UnaryOp(USub(), v)))
-                #     return tmp, tmpVars
-                # else:
-                #     return UnaryOp(USub(), v), tmpVars
-                return Subscript(tup, Constant(index), Load()), []
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, Subscript(tup, Constant(index), Load())))
+                    return tmp, tmpVars
+                else:
+                    return Subscript(tup, Constant(index), Load()), []
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
 
@@ -462,7 +456,15 @@ class Compiler:
                     orelse = [Assign([lhs], orelse)] 
                     return self.explicate_pred(test, body, orelse, basic_blocks) + cont
             case Begin(body, result):
-                raise Exception("Begin")
+                # new_body = [Assign([lhs], result)] + cont
+                # for s in reversed(body):
+                #     new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                # return new_body
+                goto = self.create_block([Assign([lhs], result)] + cont, basic_blocks)
+                new_body = [goto]
+                for s in reversed(body):
+                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                return new_body
             case _:
                 return [Assign([lhs], rhs)] + cont
                 
@@ -498,7 +500,15 @@ class Compiler:
             case Expr(value):
                 return self.explicate_effect(value, cont, basic_blocks)
             case If(test, body, orelse):
-                raise Exception("If")
+                thn = []
+                for s in body:
+                    thn.extend(self.explicate_stmt(s, [], basic_blocks))
+                els = []
+                for s in body:
+                    els.extend(self.explicate_stmt(s, [], basic_blocks))
+                goto_thn = self.create_block(thn+cont, basic_blocks)
+                goto_els = self.create_block(els+cont, basic_blocks)
+                return [If(test, [goto_thn], [goto_els])]
             case While(test, body, []):
                 label = label_name(generate_name('block'))
                 body_stmts = []
@@ -520,7 +530,7 @@ class Compiler:
                 for s in reversed(body):
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 basic_blocks[label_name('start')] = new_body
-                # print(basic_blocks)
+                print(basic_blocks)
                 return CProgram(basic_blocks)
 
     ############################################################################
@@ -575,6 +585,18 @@ class Compiler:
                         for i in body:
                             instrs.extend(self.select_stmt(i))
                         instrs.append(Instr('movq', [self.select_arg(result), self.select_arg(arg)]))
+                        return instrs
+                    case Subscript(tup, Constant(index), Load()):
+                        instrs = []
+                        instrs.append(Instr('movq', [self.select_arg(tup), Reg('r11')]))
+                        instrs.append(Instr('movq', [Deref('r11', 8*(index+1)), self.select_arg(arg)]))
+                        return instrs
+                    case Allocate(length, ty):
+                        instrs = []
+                        instrs.append(Instr('movq', [Global('free_ptr'), Reg('r11')]))
+                        instrs.append(Instr('addq', [8*(length + 1), Global('free_ptr')]))
+                        # instrs.append(Instr('movq', [$tag, Dereg('r11', 0)]))
+                        instrs.append(Instr('movq', [Ref('r11'), self.select_arg(arg)]))
                         return instrs
                     case _:
                         raise Exception('error in select_stmt, unexpected ' + repr(s))
