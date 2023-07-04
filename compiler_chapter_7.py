@@ -128,7 +128,7 @@ class Compiler:
                 for index,i in enumerate(ts):
                     stmts2.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
 
-                bytes = GlobalValue('bytes')
+                bytes = Constant(len(ts)*8 + 8)
                 fromspace_end = GlobalValue('fromspace_end')
                 free_ptr = GlobalValue('free_ptr')
                 test = Compare(BinOp(free_ptr, Add(), bytes), [Lt()], [fromspace_end])
@@ -504,7 +504,7 @@ class Compiler:
                 for s in body:
                     thn.extend(self.explicate_stmt(s, [], basic_blocks))
                 els = []
-                for s in body:
+                for s in orelse:
                     els.extend(self.explicate_stmt(s, [], basic_blocks))
                 goto_thn = self.create_block(thn+cont, basic_blocks)
                 goto_els = self.create_block(els+cont, basic_blocks)
@@ -518,6 +518,8 @@ class Compiler:
                 body = body_stmts + [Goto(label)]
                 basic_blocks[label] = self.explicate_pred(test, body, [goto_els], basic_blocks)
                 return [Goto(label)]
+            case Collect(size):
+                return [Collect(size)] + cont
             case _:
                 raise Exception('error in explicate_stmt, unexpected ' + repr(s))
 
@@ -544,18 +546,21 @@ class Compiler:
                 return Variable(n)
             case Constant(v):
                 return Immediate(int(v))
+            case GlobalValue(name):
+                return Global(name)
             case _:
                 raise Exception('error in select_arg, unexpected ' + repr(e))
 
     def select_stmt(self, s: stmt) -> List[instr]:
         # YOUR CODE HERE
         match s:
+            case Assign([Subscript(tup, Constant(index), Store())], value):
+                instrs = []
+                instrs.append(Instr('movq', [self.select_arg(tup), Reg('r11')]))
+                instrs.append(Instr('movq', [self.select_arg(value), Deref('r11', 8*(index+1))]))
+                return instrs
             case Assign([arg], value):
                 match value:
-                    case Name(n):
-                        instrs = []
-                        instrs.append(Instr('movq', [self.select_arg(value), self.select_arg(arg)]))
-                        return instrs
                     case Constant(v):
                         instrs = []
                         instrs.append(Instr('movq', [self.select_arg(value), self.select_arg(arg)]))
@@ -594,9 +599,20 @@ class Compiler:
                     case Allocate(length, ty):
                         instrs = []
                         instrs.append(Instr('movq', [Global('free_ptr'), Reg('r11')]))
-                        instrs.append(Instr('addq', [8*(length + 1), Global('free_ptr')]))
-                        # instrs.append(Instr('movq', [$tag, Dereg('r11', 0)]))
-                        instrs.append(Instr('movq', [Ref('r11'), self.select_arg(arg)]))
+                        instrs.append(Instr('addq', [Immediate(8*(length + 1)), Global('free_ptr')]))
+                        tag = length << 1
+                        # extra 64 bits: 0 1-6 7-56 57-62 63
+                        # bit 0     : 0 - entire tag is a forwarding pointer //The lower 3 bits of a pointer are always zero in any case, because our tuples are 8-byte aligned.
+                        # bit 1-6   : length of the tuple
+                        # bit 7-56  : pointer mask   //maximum tuple elem number = 50, 1 indicate its a pointer
+                        # bit 57-62 : unused
+                        # bit 63    : copied to the ToSpace
+                        instrs.append(Instr('movq', [Immediate(tag), Deref('r11', 0)]))
+                        instrs.append(Instr('movq', [Reg('r11'), self.select_arg(arg)]))
+                        return instrs
+                    case Name(n):
+                        instrs = []
+                        instrs.append(Instr('movq', [self.select_arg(value), self.select_arg(arg)]))
                         return instrs
                     case _:
                         raise Exception('error in select_stmt, unexpected ' + repr(s))
@@ -647,6 +663,12 @@ class Compiler:
                         return instrs
                     case _:
                         raise Exception('error in select_stmt, unexpected ' + repr(test))
+            case Collect(size):
+                instrs = []
+                instrs.append(Instr('movq', [Reg('r15'), Reg('rdi')]))
+                instrs.append(Instr('movq', [Immediate(size), Reg('rsi')]))
+                instrs.append(Callq(label_name("collect"), 2))
+                return instrs
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
 
@@ -661,6 +683,11 @@ class Compiler:
                         # print(stmt)
                         instrs.extend(self.select_stmt(stmt))
                     result[l] = instrs
+                instrs = []
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
+                instrs.append(Callq(label_name("initialize"), 2))
+                result['start'] = instrs + result['start']
                 return X86Program(result)
             case _:
                 raise Exception('error in select_instructions, unexpected ' + repr(p))
@@ -811,6 +838,8 @@ class Compiler:
             k = Q.pop()     # pick one variable
             if k in {Reg(n) for n in 'rax rcx rdx rsi rdi r8 r9 r10 r11 rbx r12 r13 r14 rsp rbp r15'.split(' ')}:
                 continue
+            if isinstance(k, (Global,Deref,)):
+                continue
             adj_k = graph.adjacent(k) # get other interference variable
             color_list = []
             for i in adj_k:
@@ -945,9 +974,17 @@ class Compiler:
                     instrs.append(Instr('pushq', [Reg(j)]))
                 size = math.ceil(-offset / 16)*16 + (len(p.calleesaved)%2)*8
                 instrs.append(Instr('subq', [Immediate(size),Reg('rsp')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
+                instrs.append(Callq(label_name("initialize"), 2))
+                instrs.append(Instr('movq', [Global('rootstack_begin'), Reg('r15')]))
+                instrs.append(Instr('movq', [Immediate(0), Deref('r15',0)]))
+                instrs.append(Instr('addq', [Immediate(8), Reg('r15')]))
                 instrs.append(Jump(label_name("start")))
                 body['main'] = instrs
+                body['start'] = body['start'][3:]
                 instrs = []
+                instrs.append(Instr('subq', [Immediate(8),Reg('r15')]))
                 instrs.append(Instr('addq', [Immediate(size),Reg('rsp')]))
                 for j in p.calleesaved:
                     instrs.append(Instr('popq', [Reg(j)]))
