@@ -47,7 +47,16 @@ def convert_instr(instr):
             raise Exception('error in convert_instr, unhandled ' + repr(instr))
 
 def convert_program(p):
-    if isinstance(p.body, list):
+    if isinstance(p, (X86ProgramDefs,)): # for chapter_8 after select_instructions
+        body = {}
+        for p in p.defs:
+            body.update(p.body)
+        blocks = []
+        for (l, ss) in body.items():
+            blocks.append(Tree('block',
+                               [l] + [convert_instr(instr) for instr in ss]))
+        return Tree('prog', blocks)
+    elif isinstance(p.body, list):
         main_instrs = [convert_instr(instr) for instr in p.body]
         main_block = Tree('block', [label_name('main')] + main_instrs)
         return Tree('prog', [main_block])

@@ -750,6 +750,15 @@ class Compiler:
                         instrs.append(Callq(label_name("read_int"), 0))
                         instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
                         return instrs
+                    case Call(FunRef(name, arity), args):
+                        param_regs = [Reg(i) for i in 'rdi rsi rdx rcx r8 r9'.split(' ')]
+                        instrs = []
+                        for i,a in enumerate(args):
+                            instrs.append(Instr('movq', [self.select_arg(a), param_regs[i]]))
+                        # instrs.append(Callq(label_name(name+'_start'), len(args)))
+                        instrs.append(Callq(label_name(name), len(args)))
+                        instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
+                        return instrs
                     case BinOp(left, Add(), right):
                         instrs = []
                         instrs.append(Instr('movq', [self.select_arg(left), self.select_arg(arg)]))
@@ -852,40 +861,33 @@ class Compiler:
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
 
-    def select_instructions(self, p: CProgramDefs) -> X86Program:
+    def select_instructions(self, p: CProgramDefs) -> X86ProgramDefs:
         # YOUR CODE HERE
         match p:
             case CProgramDefs(body):
-                result = dict()
-                for l,stmts in body.items():
-                    instrs = []
-                    for stmt in stmts:
-                        # print(stmt)
-                        instrs.extend(self.select_stmt(stmt))
-                    result[l] = instrs
-                instrs = []
-                instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
-                instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
-                instrs.append(Callq(label_name("initialize"), 2))
-                result['start'] = instrs + result['start']
-                return X86Program(result)
+                result = []
+                for stmt in body:
+                    match stmt:
+                        case FunctionDef(name, params, bod, dl, returns, comment):
+                            basic_blocks = {}
+                            for l,ss in bod.items():
+                                instrs = []
+                                for s in ss:
+                                    # print(s)
+                                    instrs.extend(self.select_stmt(s))
+                                basic_blocks[l] = instrs
+                            param_instrs = []
+                            param_regs = [Reg(i) for i in 'rdi rsi rdx rcx r8 r9'.split(' ')]
+                            for i, p in enumerate(params):
+                                param_instrs.append(Instr('movq', [param_regs[i], Variable(p[0])]))
+                            basic_blocks[name+'_start'] = param_instrs + basic_blocks[name+'_start']
+                            result.append(FunctionDef(name, [], basic_blocks, None, returns, None))
+                        case _:
+                            raise Exception('error in select_instructions, unexpected ' + repr(stmt))
+                print(result)
+                return X86ProgramDefs(result)
             case _:
                 raise Exception('error in select_instructions, unexpected ' + repr(p))
-            # case Module(body):
-            #     new_body = []
-            #     for stmt in body:
-            #         match stmt:
-            #             case FunctionDef(name, params, bod, dl, returns, comment):
-            #                 basic_blocks = {}
-            #                 new_bod = []
-            #                 for s in reversed(bod):
-            #                     new_bod = self.explicate_stmt(s, new_bod, basic_blocks)
-            #                 basic_blocks[label_name(name+'_start')] = new_bod
-            #                 new_body.append(FunctionDef(name, params, basic_blocks, None, returns, None))
-            #             case _:
-            #                 raise Exception('error in remove_complex_operands, unexpected ' + repr(stmt))
-            #     print(new_body)
-            #     return CProgramDefs(new_body)
 
     ###########################################################################
     # Uncover Live
@@ -941,48 +943,55 @@ class Compiler:
             case _:
                 raise Exception('error in write_vars, unexpected ' + repr(i))
 
-    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
+    def uncover_live(self, p: X86ProgramDefs) -> Dict[str, Dict[instr, Set[location]]]:
         # YOUR CODE HERE
         match p:
-            case X86Program(body):
-                graph = DirectedAdjList() # control flow graph (CFG)
-                worklist = deque(['start'])
-                visited = set()
-                while worklist:
-                    head = worklist.popleft()
-                    if head in visited:
-                        continue
-                    visited.add(head)
-                    for instr in body[head]:
-                        if isinstance(instr, (Jump, JumpIf)):
-                            graph.add_edge(instr.label, head)
-                            worklist.append(instr.label)
+            case X86ProgramDefs(defs):
+                result = {}
+                for stmt in defs:
+                    match stmt:
+                        case FunctionDef(name, params, body, dl, returns, comment):
+                            graph = DirectedAdjList() # control flow graph (CFG)
+                            worklist = deque([name+'_start'])
+                            visited = set()
+                            while worklist:
+                                head = worklist.popleft()
+                                if head in visited:
+                                    continue
+                                visited.add(head)
+                                for instr in body[head]:
+                                    if isinstance(instr, (Jump, JumpIf)):
+                                        graph.add_edge(instr.label, head)
+                                        worklist.append(instr.label)
 
-                def transfer(node: str, live_after: set[location]) -> set[location]:
-                    for instr in reversed(body[node]):
-                        if not isinstance(instr, (Jump, JumpIf)):
-                            r_set = self.read_vars(instr)
-                            w_set = self.write_vars(instr)
-                            live_after = live_after - w_set | r_set
-                    return live_after
+                            def transfer(node: str, live_after: set[location]) -> set[location]:
+                                for instr in reversed(body[node]):
+                                    if not isinstance(instr, (Jump, JumpIf)):
+                                        r_set = self.read_vars(instr)
+                                        w_set = self.write_vars(instr)
+                                        live_after = live_after - w_set | r_set
+                                return live_after
 
-                live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
+                            live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
 
-                instr_dict = {}
-                after = set()
-                for v in live_before_block:
-                    for i in reversed(body[v]):
-                        if isinstance(i, (Jump, JumpIf)):
-                            # print(v, 'jump to: ',graph.out[v])
-                            instr_dict[i] = live_before_block[i.label]
-                        else:
-                            instr_dict[i] = after
-                        r = self.read_vars(i)
-                        w = self.write_vars(i)
-                        before = (after - w).union(r)
-                        after = before
-                return instr_dict
+                            instr_dict = {}
+                            after = set()
+                            for v in live_before_block:
+                                for i in reversed(body[v]):
+                                    if isinstance(i, (Jump, JumpIf)):
+                                        # print(v, 'jump to: ',graph.out[v])
+                                        instr_dict[i] = live_before_block[i.label]
+                                    else:
+                                        instr_dict[i] = after
+                                    r = self.read_vars(i)
+                                    w = self.write_vars(i)
+                                    before = (after - w).union(r)
+                                    after = before
+                            result[name] = instr_dict
+                        case _:
+                            raise Exception('error in select_instructions, unexpected ' + repr(stmt))
 
+                return result
             case _:
                 raise Exception('error in uncover_live, unexpected ' + repr(p))
 
@@ -990,24 +999,36 @@ class Compiler:
     # Build Interference
     ############################################################################
 
-    def build_interference(self, p: X86Program,
-                           live_after: Dict[instr, Set[location]]) -> UndirectedAdjList:
+    def build_interference(self, p: X86ProgramDefs,
+                           live_after: Dict[str, Dict[instr, Set[location]]]) -> Dict[str, UndirectedAdjList]:
         # YOUR CODE HERE
-        graph = UndirectedAdjList()
-        for l, ss in p.body.items():
-            for i in ss:
-                match i:
-                    case Instr('movq', [s,d]):
-                        for v in live_after[i]:
-                            if v != s and v != d:
-                                graph.add_edge(d,v)
-                    case _:
-                        w = self.write_vars(i)
-                        for d in w:
-                            for v in live_after[i]:
-                                if d != v:
-                                    graph.add_edge(d,v)
-        return graph
+        match p:
+            case X86ProgramDefs(defs):
+                result = {}
+                for stmt in defs:
+                    match stmt:
+                        case FunctionDef(name, params, body, dl, returns, comment):
+                            graph = UndirectedAdjList()
+                            for l, ss in body.items():
+                                for i in ss:
+                                    match i:
+                                        case Instr('movq', [s,d]):
+                                            for v in live_after[name][i]:
+                                                if v != s and v != d:
+                                                    graph.add_edge(d,v)
+                                        case _:
+                                            w = self.write_vars(i)
+                                            for d in w:
+                                                for v in live_after[name][i]:
+                                                    if d != v:
+                                                        graph.add_edge(d,v)
+                            result[name] = graph
+                        case _:
+                            raise Exception('error in build_interference, unexpected ' + repr(stmt))
+                return result
+            case _:
+                raise Exception('error in build_interference, unexpected ' + repr(p))
+        
 
     ############################################################################
     # Allocate Registers
@@ -1052,53 +1073,65 @@ class Compiler:
         # print(L)
         return color, variables
 
-    def allocate_registers(self, p: X86Program,
-                           graph: UndirectedAdjList) -> X86Program:
+    def allocate_registers(self, p: X86ProgramDefs,
+                           graph: Dict[str, UndirectedAdjList]) -> X86ProgramDefs:
         # YOUR CODE HERE
-        var = graph.vertices()
-        # print(var)
-        color, var = self.color_graph(graph, var) # call coloring algorithm, get coloring variables
-        # print(color)
-        body = {}
-        for l, ss in p.body.items():
-            instrs = []
-            for i in ss:
-                match i:
-                    case Instr(name, [arg]):
-                        if arg in color:
-                            if color[arg] == 0:
-                                arg = Reg('rcx')
-                            elif color[arg] == 1:
-                                arg = Reg('rbx')
-                            elif color[arg] > 1:
-                                arg = Deref('rbp',-(color[arg]-1)*8)
-                        elif isinstance(arg, Variable):
-                            arg = Reg('rcx')
-                        instrs.append(Instr(name,[arg]))
-                    case Instr(name, [arg1,arg2]):
-                        if arg1 in color:
-                            if color[arg1] == 0:
-                                arg1 = Reg('rcx')
-                            elif color[arg1] == 1:
-                                arg1 = Reg('rbx')
-                            elif color[arg1] > 1:
-                                arg1 = Deref('rbp',-(color[arg1]-1)*8)
-                        elif isinstance(arg1, Variable):
-                            arg1 = Reg('rcx')
-                        if arg2 in color:
-                            if color[arg2] == 0:
-                                arg2 = Reg('rcx')
-                            elif color[arg2] == 1:
-                                arg2 = Reg('rbx')
-                            elif color[arg2] > 1:
-                                arg2 = Deref('rbp',-(color[arg2]-1)*8)
-                        elif isinstance(arg2, Variable):
-                            arg2 = Reg('rcx')
-                        instrs.append(Instr(name,[arg1,arg2]))
-                    case _:
-                        instrs.append(i)                            
-            body[l] = instrs
-        p = X86Program(body)
+
+        result = []
+        for stmt in p.defs:
+            match stmt:
+                case FunctionDef(name, params, bod, dl, returns, comment):
+
+                    var = graph[name].vertices()
+                    # print(var)
+                    color, var = self.color_graph(graph[name], var) # call coloring algorithm, get coloring variables
+                    # print(color)
+                    body = {}
+                    for l, ss in bod.items():
+                        instrs = []
+                        for i in ss:
+                            match i:
+                                case Instr(name, [arg]):
+                                    if arg in color:
+                                        if color[arg] == 0:
+                                            arg = Reg('rcx')
+                                        elif color[arg] == 1:
+                                            arg = Reg('rbx')
+                                        elif color[arg] > 1:
+                                            arg = Deref('rbp',-(color[arg]-1)*8)
+                                    elif isinstance(arg, Variable):
+                                        arg = Reg('rcx')
+                                    instrs.append(Instr(name,[arg]))
+                                case Instr(name, [arg1,arg2]):
+                                    if arg1 in color:
+                                        if color[arg1] == 0:
+                                            arg1 = Reg('rcx')
+                                        elif color[arg1] == 1:
+                                            arg1 = Reg('rbx')
+                                        elif color[arg1] > 1:
+                                            arg1 = Deref('rbp',-(color[arg1]-1)*8)
+                                    elif isinstance(arg1, Variable):
+                                        arg1 = Reg('rcx')
+                                    if arg2 in color:
+                                        if color[arg2] == 0:
+                                            arg2 = Reg('rcx')
+                                        elif color[arg2] == 1:
+                                            arg2 = Reg('rbx')
+                                        elif color[arg2] > 1:
+                                            arg2 = Deref('rbp',-(color[arg2]-1)*8)
+                                    elif isinstance(arg2, Variable):
+                                        arg2 = Reg('rcx')
+                                    instrs.append(Instr(name,[arg1,arg2]))
+                                case _:
+                                    instrs.append(i)                            
+                        body[l] = instrs
+
+                    result.append(FunctionDef(name, params, body, dl, returns, comment))
+
+                case _:
+                    raise Exception('error in build_interference, unexpected ' + repr(stmt))
+        print(result)
+        p = X86ProgramDefs(result)
         setattr(p, 'calleesaved', ['rbx'])
         return p
 
@@ -1106,7 +1139,7 @@ class Compiler:
     # Assign Homes
     ############################################################################
 
-    def assign_homes(self, pseudo_x86: X86Program) -> X86Program:
+    def assign_homes(self, pseudo_x86: X86ProgramDefs) -> X86ProgramDefs:
         # YOUR CODE HERE
         live_after = self.uncover_live(pseudo_x86)
         # for k,v in live_after.items():
@@ -1119,7 +1152,7 @@ class Compiler:
     # Patch Instructions
     ###########################################################################
 
-    def patch_instructions(self, p: X86Program) -> X86Program:
+    def patch_instructions(self, p: X86ProgramDefs) -> X86ProgramDefs:
         # YOUR CODE HERE
         body = {}
         for l,ss in p.body.items():
@@ -1147,10 +1180,10 @@ class Compiler:
     # Prelude & Conclusion
     ###########################################################################
 
-    def prelude_and_conclusion(self, p: X86Program) -> X86Program:
+    def prelude_and_conclusion(self, p: X86ProgramDefs) -> X86Program:
         # YOUR CODE HERE
         match p:
-            case X86Program(body):
+            case X86ProgramDefs(body):
                 offset = 0
                 for l,ss in body.items():
                     for j in ss:
