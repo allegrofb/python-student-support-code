@@ -30,19 +30,28 @@ interp_dict = {
 from utils import enable_tracing
 enable_tracing()
 
-run_one_test(os.getcwd() + '/tests/if/if_shrink_1.py',
-                'if',
-                compiler,
-                'if',
-                typecheck_dict,
-                interp_dict)
-
-# run_one_test(os.getcwd() + '/tests/if/if_explicate_control_7.py',
+# run_one_test(os.getcwd() + '/tests/if/if_shrink_1.py',
 #                 'if',
 #                 compiler,
 #                 'if',
 #                 typecheck_dict,
 #                 interp_dict)
+
+
+# run_one_test(os.getcwd() + '/tests/if/if_explicate_control_2.py',
+#                 'if',
+#                 compiler,
+#                 'if',
+#                 typecheck_dict,
+#                 interp_dict)
+
+
+run_one_test(os.getcwd() + '/tests/if/if_explicate_control_7.py',
+                'if',
+                compiler,
+                'if',
+                typecheck_dict,
+                interp_dict)
 
 
 # run_tests('if', compiler, 'if',

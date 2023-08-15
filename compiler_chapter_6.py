@@ -286,11 +286,11 @@ class Compiler:
                 if not isinstance(test, Constant):
                     goto = self.create_block(cont, basic_blocks)
                     cont = []
-                    if not isinstance(body, Constant):
+                    if not isinstance(body, (Constant,Name,)):
                         body = self.explicate_effect(body, cont, basic_blocks) # for Begin
                     body = cont + [Assign([lhs], body)] + [goto] 
                     cont = []
-                    if not isinstance(orelse, Constant):
+                    if not isinstance(orelse, (Constant,Name,)):
                         orelse = self.explicate_effect(orelse, cont, basic_blocks) # for Begin
                     orelse = cont + [Assign([lhs], orelse)] + [goto] 
                     return self.explicate_pred(test, body, orelse, basic_blocks)
@@ -556,7 +556,7 @@ class Compiler:
                         if not isinstance(instr, (Jump, JumpIf)):
                             r_set = self.read_vars(instr)
                             w_set = self.write_vars(instr)
-                            live_after = live_after - w_set | r_set
+                            live_after = (live_after - w_set) | r_set
                     return live_after
 
                 live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
@@ -568,6 +568,7 @@ class Compiler:
                         if isinstance(i, (Jump, JumpIf)):
                             # print(v, 'jump to: ',graph.out[v])
                             instr_dict[i] = live_before_block[i.label]
+                            after = live_before_block[i.label]
                         else:
                             instr_dict[i] = after
                         r = self.read_vars(i)

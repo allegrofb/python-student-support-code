@@ -3,13 +3,14 @@ from ast import *
 from utils import *
 from x86_ast import *
 import os
-from typing import List, Tuple, Set, Dict
+from typing import List, Set, Dict
+from typing import Tuple as Tuple_
 from graph import UndirectedAdjList, DirectedAdjList, topological_sort, transpose
 import math
 from dataflow_analysis import analyze_dataflow
 from collections import defaultdict, deque
 
-Binding = Tuple[Name, expr]
+Binding = Tuple_[Name, expr]
 Temporaries = List[Binding]
 
 ##############################################################################
@@ -30,7 +31,6 @@ def mk_tag(typ: Type) -> int:
         raise Exception(f"The maximum size of tuples allowed is {max_tuple_size}")
     pointer_mask = as_bit_string(map(is_pointer, typ.types))[::-1]
     bits = f"{pointer_mask:>0{max_tuple_size}}{l:06b}1"
-    print("********************",bits)
     return int(bits, 2)
 
 def is_pointer(typ: Type) -> bool:
@@ -56,13 +56,28 @@ class Compiler:
             case UnaryOp(USub(), v):
                 return UnaryOp(USub(), self.shrink_exp(v))
             case IfExp(test, body, orelse):
-                return IfExp(self.shrink_exp(test), self.shrink_exp(body), self.shrink_exp(orelse))
+                breakpoint()
+                cond = self.shrink_exp(test)
+                if isinstance(cond, (bool,)):
+                    return self.shrink_exp(body) if cond else self.shrink_exp(orelse)
+                else:
+                    return IfExp(cond, self.shrink_exp(body), self.shrink_exp(orelse))
             case UnaryOp(Not(), v):
-                return UnaryOp(Not(), self.shrink_exp(v))
+                v = self.shrink_exp(v)
+                if isinstance(v, (bool,)):
+                    return not v
+                else:
+                    return UnaryOp(Not(), v)
             case BoolOp(And(), values):
-                return IfExp(self.shrink_exp(values[0]), self.shrink_exp(values[1]), Constant(False))
+                cond = self.shrink_exp(values[0])
+                if isinstance(cond, (bool,)):
+                    return self.shrink_exp(values[1]) if cond else False
+                else:
+                    return IfExp(cond, self.shrink_exp(values[1]), Constant(False))
             case BoolOp(Or(), values):
                 return BoolOp(Or(), [self.shrink_exp(i) for i in values])
+            case Compare(left, [cmp], [right]) if isinstance(cmp, Is):
+                return self.shrink_exp(left) is self.shrink_exp(right)
             case Compare(left, [cmp], [right]):
                 return Compare(self.shrink_exp(left), [cmp], [self.shrink_exp(right)])
             case _:
@@ -72,9 +87,13 @@ class Compiler:
         # YOUR CODE HERE
         match s:
             case If(test, body, orelse):
-                return If(self.shrink_exp(test), 
-                            [self.shrink_stmt(i) for i in body], 
-                            [self.shrink_stmt(i) for i in orelse])
+                cond = self.shrink_exp(test)
+                if isinstance(cond, (bool,)):
+                    return [self.shrink_stmt(i) for i in body] if cond else [self.shrink_stmt(i) for i in orelse]
+                else:                    
+                    return If(cond, 
+                                [self.shrink_stmt(i) for i in body], 
+                                [self.shrink_stmt(i) for i in orelse])
             case Assign([Name(id)], value):
                 return Assign([Name(id)], self.shrink_exp(value))
             case Expr(Call(Name('print'), [arg])):
@@ -82,7 +101,11 @@ class Compiler:
             case Expr(value):
                 return Expr(self.shrink_exp(value))
             case While(test, body, []):
-                return While(self.shrink_exp(test),
+                cond = self.shrink_exp(test)
+                if isinstance(cond, (bool,)):
+                    return [self.shrink_stmt(i) for i in body] if cond else []
+                else:                    
+                    return While(cond,
                           [self.shrink_stmt(i) for i in body], [])
             case _:
                 raise Exception('error in shrink_stmt, unexpected ' + repr(s))
@@ -92,7 +115,11 @@ class Compiler:
             case Module(body):
                 new_body = []
                 for stmt in body:
-                    new_body.append(self.shrink_stmt(stmt))
+                    ss = self.shrink_stmt(stmt)
+                    if isinstance(ss, (list,)):
+                        new_body.extend(ss)
+                    else:
+                        new_body.append(ss)
                 print(new_body)
                 return Module(new_body)
             case _:
@@ -102,7 +129,7 @@ class Compiler:
     # Expose Allocation
     ############################################################################
 
-    def expose_exp(self, e: expr) -> Tuple[expr, List[expr]]:
+    def expose_exp(self, e: expr) -> expr:
         # YOUR CODE HERE
         match e:
             case BinOp(left, cmp, right):
@@ -114,9 +141,9 @@ class Compiler:
             # case IfExp(test, body, orelse):
             #     return IfExp(test, body, orelse), tmpVars
             case Subscript(tup, Constant(index), Load()):
-                tup,ss = self.expose_exp(tup)
-                return Subscript(tup, Constant(index), Load()), ss
-            case ast.Tuple(es, Load()):
+                tup = self.expose_exp(tup)
+                return Subscript(tup, Constant(index), Load())
+            case Tuple(es, Load()):
 
                 # x0 = e0
                 # ...
@@ -133,83 +160,47 @@ class Compiler:
 
                 stmts = []
                 ts = []
-                ss = []
                 for e in es:
                     tmp = Name(generate_name('tmpVar'))
-                    # breakpoint()
                     match e:
                         case Constant(value) if isinstance(value, bool):
                             ts.append((tmp,BoolType()))
                         case Constant(value):
                             ts.append((tmp,IntType()))
-                        case ast.Tuple(value):
+                        case Tuple(value):
                             ts.append((tmp,e.has_type))
-                            e, ss = self.expose_exp(e)
+                            e = self.expose_exp(e)
                         case _:
                             raise Exception('error in expose_exp, unexpected ' + repr(e))
                     stmts.append(Assign([tmp], e))
+
+                stmts2 = []
+                v = Name(generate_name('tmpVar'))
+                stmts2.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
+
+                for index,i in enumerate(ts):
+                    stmts2.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
 
                 bytes = Constant(len(ts)*8 + 8)
                 fromspace_end = GlobalValue('fromspace_end')
                 free_ptr = GlobalValue('free_ptr')
                 test = Compare(BinOp(free_ptr, Add(), bytes), [Lt()], [fromspace_end])
-                orelse = [Collect(bytes)]  # Collect function should be stmt
-                stmts.append(If(test,[],orelse))
+                body = stmts2
+                orelse = [Collect(bytes)] + stmts2
+                stmts.append(If(test,body,orelse))
 
-                v = Name(generate_name('tmpVar'))
-                stmts.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
-
-                for index,i in enumerate(ts):
-                    stmts.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
-
-                return v, ss+stmts
-
-                # stmts = []
-                # ts = []
-                # for e in es:
-                #     tmp = Name(generate_name('tmpVar'))
-                #     match e:
-                #         case Constant(value) if isinstance(value, bool):
-                #             ts.append((tmp,BoolType()))
-                #         case Constant(value):
-                #             ts.append((tmp,IntType()))
-                #         case Tuple(value):
-                #             ts.append((tmp,e.has_type))
-                #             e = self.expose_exp(e)
-                #         case _:
-                #             raise Exception('error in expose_exp, unexpected ' + repr(e))
-                #     stmts.append(Assign([tmp], e))
-
-                # stmts2 = []
-                # v = Name(generate_name('tmpVar'))
-                # stmts2.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
-
-                # for index,i in enumerate(ts):
-                #     stmts2.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
-
-                # bytes = Constant(len(ts)*8 + 8)
-                # fromspace_end = GlobalValue('fromspace_end')
-                # free_ptr = GlobalValue('free_ptr')
-                # test = Compare(BinOp(free_ptr, Add(), bytes), [Lt()], [fromspace_end])
-                # body = stmts2
-                # orelse = [Collect(bytes)] + stmts2
-                # stmts.append(If(test,body,orelse))
-
-                # return Begin(stmts, v)
-
-
+                return Begin(stmts, v)
             case _:
-                return e, []
+                return e
 
     def expose_stmt(self, s: stmt) -> stmt:
         # YOUR CODE HERE
         match s:
             case Assign([Name(id)], value):
-                value, ss = self.expose_exp(value)
-                return ss + [Assign([Name(id)], value)]
+                return Assign([Name(id)], self.expose_exp(value))
             case Expr(Call(Name('print'), [arg])):
-                arg, ss = self.expose_exp(arg)
-                return ss + [Expr(Call(Name('print'), [arg]))]
+                arg = self.expose_exp(arg)
+                return Expr(Call(Name('print'), [arg]))
             # case Assign([Subscript(tup, Constant(index), Store())], value):                
             #     return
             # case Expr(value):
@@ -251,7 +242,7 @@ class Compiler:
             case Module(body):
                 new_body = []
                 for stmt in body:
-                    new_body.extend(self.expose_stmt(stmt))
+                    new_body.append(self.expose_stmt(stmt))
                 print(new_body)
                 return Module(new_body)
             case _:
@@ -261,7 +252,7 @@ class Compiler:
     # Remove Complex Operands
     ############################################################################
 
-    def rco_exp(self, e: expr, need_atomic: bool) -> Tuple[expr, Temporaries]:
+    def rco_exp(self, e: expr, need_atomic: bool) -> Tuple_[expr, Temporaries]:
         # YOUR CODE HERE
         match e:
             case Name(id):
@@ -338,6 +329,8 @@ class Compiler:
                     return tmp, tmpVars
                 else:
                     return UnaryOp(Not(), v), tmpVars
+            case Compare(left, [cmp], [right]) if isinstance(cmp, Is):
+                return left is right, []
             case Compare(left, [cmp], [right]):
                 tmpVars = []
                 if not isinstance(left, (Name, Constant, GlobalValue,)):
@@ -399,11 +392,6 @@ class Compiler:
                 return Begin(stmts, result), tmpVars
             case Subscript(tup, Constant(index), Load()):
                 tmpVars = []
-                if not isinstance(tup, (Name, Constant, GlobalValue,)):
-                    tup2, tmp = self.rco_exp(tup, need_atomic=True)
-                    tmpVars.extend(tmp)
-                    tup = Name(generate_name('tmpVar'))
-                    tmpVars.append((tup, tup2))
                 if need_atomic:
                     tmp = Name(generate_name('tmpVar'))
                     tmpVars.append((tmp, Subscript(tup, Constant(index), Load())))
@@ -523,11 +511,11 @@ class Compiler:
                 if not isinstance(test, Constant):
                     goto = self.create_block(cont, basic_blocks)
                     cont = []
-                    if not isinstance(body, (Constant,Name,)):
+                    if not isinstance(body, Constant):
                         body = self.explicate_effect(body, cont, basic_blocks) # for Begin
                     body = cont + [Assign([lhs], body)] + [goto] 
                     cont = []
-                    if not isinstance(orelse, (Constant,Name,)):
+                    if not isinstance(orelse, Constant):
                         orelse = self.explicate_effect(orelse, cont, basic_blocks) # for Begin
                     orelse = cont + [Assign([lhs], orelse)] + [goto] 
                     return self.explicate_pred(test, body, orelse, basic_blocks)
@@ -623,11 +611,7 @@ class Compiler:
         # YOUR CODE HERE
         match e:
             case Name(n):
-                v = Variable(n)
-                if hasattr(e, 'has_type'):  # var_types ???
-                    print(e.has_type)
-                    # setattr(v, 'var_types', e.has_type)
-                return v
+                return Variable(n)
             case Constant(v):
                 return Immediate(int(v))
             case GlobalValue(name):
@@ -846,7 +830,7 @@ class Compiler:
                         if not isinstance(instr, (Jump, JumpIf)):
                             r_set = self.read_vars(instr)
                             w_set = self.write_vars(instr)
-                            live_after = (live_after - w_set) | r_set
+                            live_after = live_after - w_set | r_set
                     return live_after
 
                 live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
@@ -858,7 +842,6 @@ class Compiler:
                         if isinstance(i, (Jump, JumpIf)):
                             # print(v, 'jump to: ',graph.out[v])
                             instr_dict[i] = live_before_block[i.label]
-                            after = live_before_block[i.label]
                         else:
                             instr_dict[i] = after
                         r = self.read_vars(i)
@@ -899,7 +882,7 @@ class Compiler:
 
     # Returns the coloring and the set of spilled variables.
     def color_graph(self, graph: UndirectedAdjList,
-                    variables: Set[location]) -> Tuple[Dict[location, int], Set[location]]:
+                    variables: Set[location]) -> Tuple_[Dict[location, int], Set[location]]:
         # YOUR CODE HERE
         from priority_queue import PriorityQueue
         L = {}

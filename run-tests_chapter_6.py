@@ -37,13 +37,19 @@ enable_tracing()
 #                 typecheck_dict,
 #                 interp_dict)
 
-run_one_test(os.getcwd() + '/tests/while/while_test_1.py',
+# run_one_test(os.getcwd() + '/tests/while/while_test_1.py',
+#                 'while',
+#                 compiler,
+#                 'while',
+#                 typecheck_dict,
+#                 interp_dict)
+
+run_one_test(os.getcwd() + '/tests/while/while_test_2.py',
                 'while',
                 compiler,
                 'while',
                 typecheck_dict,
                 interp_dict)
-
 
 # run_tests('if', compiler, 'if',
 #             typecheck_dict,

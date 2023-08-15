@@ -7,28 +7,28 @@ conclusion:
     retq 
 
 	.align 16
-block.3:
+block.1:
     movq %rcx, %rdi
     callq print_int
     jmp conclusion
 
 	.align 16
-block.4:
-    movq $42, %rcx
-    jmp block.3
+block.2:
+    movq %rbx, %rcx
+    jmp block.1
 
 	.align 16
-block.5:
-    movq $0, %rcx
-    jmp block.3
+block.3:
+    jmp block.1
 
 	.align 16
 start:
-    callq read_int
-    movq %rax, %rcx
-    cmpq $1, %rcx
-    je block.4
-    jmp block.5
+    movq $40, %rbx
+    movq $2, %rcx
+    movq $3, %rax
+    cmpq $1, %rax
+    jg block.2
+    jmp block.3
 
 	.globl main
 	.align 16

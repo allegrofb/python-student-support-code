@@ -14,19 +14,20 @@ block.1:
 
 	.align 16
 block.2:
-    movq $2, %rcx
     jmp block.1
 
 	.align 16
 block.3:
-    movq $10, %rcx
+    movq %rbx, %rcx
     jmp block.1
 
 	.align 16
 start:
+    movq $40, %rcx
+    movq $2, %rbx
     movq $3, %rax
     cmpq $1, %rax
-    jl block.2
+    jg block.2
     jmp block.3
 
 	.globl main

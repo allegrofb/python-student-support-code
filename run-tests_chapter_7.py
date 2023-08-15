@@ -41,19 +41,34 @@ enable_tracing()
 #                 typecheck_dict,
 #                 interp_dict)
 
-# run_one_test(os.getcwd() + '/tests/tuple/tuple_test_1.py',
+run_one_test(os.getcwd() + '/tests/tuple/tuple_test_1.py',
+                'tuple',
+                compiler,
+                'tuple',
+                typecheck_dict,
+                interp_dict)
+
+# run_one_test(os.getcwd() + '/tests/tuple/tuple_test_3.py',
 #                 'tuple',
 #                 compiler,
 #                 'tuple',
 #                 typecheck_dict,
 #                 interp_dict)
 
-run_one_test(os.getcwd() + '/tests/tuple/tuple_test_4.py',
-                'tuple',
-                compiler,
-                'tuple',
-                typecheck_dict,
-                interp_dict)
+# run_one_test(os.getcwd() + '/tests/tuple/tuple_test_4.py',
+#                 'tuple',
+#                 compiler,
+#                 'tuple',
+#                 typecheck_dict,
+#                 interp_dict)
+
+# run_one_test(os.getcwd() + '/tests/tuple/tuple_test_2.py',   # failed
+#                 'tuple',
+#                 compiler,
+#                 'tuple',
+#                 typecheck_dict,
+#                 interp_dict)
+
 
 
 # run_tests('if', compiler, 'if',
