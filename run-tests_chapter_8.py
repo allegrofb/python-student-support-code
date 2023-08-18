@@ -39,12 +39,27 @@ from utils import enable_tracing
 enable_tracing()
 
 
-run_one_test(os.getcwd() + '/tests/fun/fun_test_3.py',
+run_one_test(os.getcwd() + '/tests/fun/fun_test_1.py',
                 'fun',
                 compiler,
                 'fun',
                 typecheck_dict,
                 interp_dict)
+
+
+# run_one_test(os.getcwd() + '/tests/fun/fun_test_3.py',
+#                 'fun',
+#                 compiler,
+#                 'fun',
+#                 typecheck_dict,
+#                 interp_dict)
+
+# run_one_test(os.getcwd() + '/tests/fun/fun_test_2.py',
+#                 'fun',
+#                 compiler,
+#                 'fun',
+#                 typecheck_dict,
+#                 interp_dict)
 
 
 # run_tests('if', compiler, 'if',

@@ -149,7 +149,7 @@ class Compiler:
         # YOUR CODE HERE
         match s:
             case If(test, body, orelse):
-                return If(self.reveal_exp(test), 
+                return If(self.reveal_exp(test, func_refs), 
                             [self.reveal_stmt(i, func_refs) for i in body], 
                             [self.reveal_stmt(i, func_refs) for i in orelse])
             case Assign([Name(id)], value):
@@ -232,8 +232,10 @@ class Compiler:
                 return BinOp(left, cmp, right), ss+ss2
             # case UnaryOp(USub(), v):
             #     return UnaryOp(USub(), v), tmpVars
-            # case Compare(left, [cmp], [right]):
-            #     return Compare(left, [cmp], [right]), tmpVars
+            case Compare(left, [cmp], [right]):
+                left, ss = self.expose_exp(left)
+                right, ss2 = self.expose_exp(right)
+                return Compare(left, [cmp], [right]), ss+ss2
             case IfExp(test, body, orelse):
                 test, ss = self.expose_exp(test)
                 body, ss2 = self.expose_exp(body)
@@ -315,7 +317,7 @@ class Compiler:
                 return ss + [Expr(Call(Name('print'), [arg]))]
             case Return(value):
                 value, ss = self.expose_exp(value)
-                return ss+[Return(value)]
+                return ss + [Return(value)]
             # case Assign([Subscript(tup, Constant(index), Store())], value):                
             #     return
             # case Expr(value):
@@ -325,19 +327,16 @@ class Compiler:
             #         stmts.append(Assign([i[0]], i[1]))
             #     stmts.append(Expr(value))
             #     return stmts
-            # case If(test, body, orelse):
-            #     stmts = []
-            #     test, tmp = self.expose_exp(test)
-            #     for i in tmp:
-            #         stmts.append(Assign([i[0]], i[1]))
-            #     body_stmts = []
-            #     for i in body:
-            #         body_stmts.extend(self.expose_stmt(i))
-            #     orelse_stmts = []
-            #     for i in orelse:
-            #         orelse_stmts.extend(self.expose_stmt(i))
-            #     stmts.append(If(test,body_stmts,orelse_stmts))
-            #     return stmts
+            case If(test, body, orelse):
+                test, stmts = self.expose_exp(test)
+                body_stmts = []
+                for i in body:
+                    body_stmts.extend(self.expose_stmt(i))
+                orelse_stmts = []
+                for i in orelse:
+                    orelse_stmts.extend(self.expose_stmt(i))
+                stmts.append(If(test,body_stmts,orelse_stmts))
+                return stmts
             # case While(test, body, []):
             #     stmts = []
             #     test, tmp = self.expose_exp(test)
@@ -878,6 +877,7 @@ class Compiler:
                 instrs = []
                 instrs.append(Instr('movq', [self.select_arg(arg), Reg('rax')]))
                 # instrs.append(Jump(label_name("conclusion")))
+                instrs.append(Jump(label_name(self.func_name+"_conclusion")))
                 return instrs
             case Goto(label):
                 instrs = []
@@ -929,6 +929,8 @@ class Compiler:
                     match stmt:
                         case FunctionDef(name, params, bod, dl, returns, comment):
                             basic_blocks = {}
+                            self.func_name = name
+                            basic_blocks[name+'_conclusion'] = []
                             for l,ss in bod.items():
                                 instrs = []
                                 for s in ss:
@@ -1285,7 +1287,6 @@ class Compiler:
                     instrs.append(Instr('addq', [Immediate(8), Reg('r15')]))
                     instrs.append(Jump(label_name(fname+"_start")))
                     body[fname] = instrs
-                    body[fname+'_start'].append(Jump(label_name(fname+"_conclusion")))
                     instrs = []
                     instrs.append(Instr('subq', [Immediate(8),Reg('r15')]))
                     instrs.append(Instr('addq', [Immediate(size),Reg('rsp')]))
