@@ -106,18 +106,26 @@ class Compiler:
         # YOUR CODE HERE
         match e:
             case BinOp(left, cmp, right):
-                return BinOp(self.expose_exp(left), cmp, self.expose_exp(right))
+                left, ss = self.expose_exp(left)
+                right, ss2 = self.expose_exp(right)
+                return BinOp(left, cmp, right), ss+ss2
             # case UnaryOp(USub(), v):
             #     return UnaryOp(USub(), v), tmpVars
             # case Compare(left, [cmp], [right]):
             #     return Compare(left, [cmp], [right]), tmpVars
-            # case IfExp(test, body, orelse):
-            #     return IfExp(test, body, orelse), tmpVars
+            case IfExp(test, body, orelse):
+                test, ss = self.expose_exp(test)
+                body, ss2 = self.expose_exp(body)
+                orelse, ss3 = self.expose_exp(orelse)
+                return IfExp(test, body, orelse), ss+ss2+ss3
+            case Name(id):
+                return Name(id), []
+            case Constant(value):
+                return Constant(value), []
             case Subscript(tup, Constant(index), Load()):
                 tup,ss = self.expose_exp(tup)
                 return Subscript(tup, Constant(index), Load()), ss
             case ast.Tuple(es, Load()):
-
                 # x0 = e0
                 # ...
                 # xn–1 = en–1
@@ -130,7 +138,6 @@ class Compiler:
                 # ...
                 # v[n – 1] = xn–1
                 # v                           //<---------- v tuple varialbe
-
                 stmts = []
                 ts = []
                 ss = []
@@ -164,42 +171,9 @@ class Compiler:
 
                 return v, ss+stmts
 
-                # stmts = []
-                # ts = []
-                # for e in es:
-                #     tmp = Name(generate_name('tmpVar'))
-                #     match e:
-                #         case Constant(value) if isinstance(value, bool):
-                #             ts.append((tmp,BoolType()))
-                #         case Constant(value):
-                #             ts.append((tmp,IntType()))
-                #         case Tuple(value):
-                #             ts.append((tmp,e.has_type))
-                #             e = self.expose_exp(e)
-                #         case _:
-                #             raise Exception('error in expose_exp, unexpected ' + repr(e))
-                #     stmts.append(Assign([tmp], e))
-
-                # stmts2 = []
-                # v = Name(generate_name('tmpVar'))
-                # stmts2.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
-
-                # for index,i in enumerate(ts):
-                #     stmts2.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
-
-                # bytes = Constant(len(ts)*8 + 8)
-                # fromspace_end = GlobalValue('fromspace_end')
-                # free_ptr = GlobalValue('free_ptr')
-                # test = Compare(BinOp(free_ptr, Add(), bytes), [Lt()], [fromspace_end])
-                # body = stmts2
-                # orelse = [Collect(bytes)] + stmts2
-                # stmts.append(If(test,body,orelse))
-
-                # return Begin(stmts, v)
-
-
             case _:
-                return e, []
+                # return e, []
+                raise Exception('error in expose_exp, unexpected ' + repr(e))
 
     def expose_stmt(self, s: stmt) -> stmt:
         # YOUR CODE HERE
@@ -243,7 +217,7 @@ class Compiler:
             #     stmts.append(While(test,body_stmts,[]))
             #     return stmts
             case _:
-                raise Exception('error in rco_stmt, unexpected ' + repr(s))
+                raise Exception('error in expose_stmt, unexpected ' + repr(s))
 
     def expose_allocation(self, p: Module) -> Module:
         # YOUR CODE HERE
@@ -357,18 +331,12 @@ class Compiler:
                 else:
                     return Compare(left, [cmp], [right]), tmpVars
             case IfExp(test, body, orelse):
-                # tmpVars = []
-                # if need_atomic:
-                #     tmp = Name(generate_name('tmpVar'))
-                #     tmpVars.append((tmp, IfExp(test, body, orelse)))
-                #     return tmp, tmpVars
-                # else:
-                #     return IfExp(test, body, orelse), tmpVars
-
                 tmpVars = []
                 if not isinstance(test, (Name, Constant, GlobalValue,)):
-                    test, tmp = self.rco_exp(test, need_atomic=False)
+                    test2, tmp = self.rco_exp(test, need_atomic=False)
                     tmpVars.extend(tmp)
+                    test = Name(generate_name('tmpVar'))
+                    tmpVars.append((test, test2))
                 if not isinstance(body, (Name, Constant,  GlobalValue, Compare,)):  # branch have side-effect code, insert Begin expr
                     body2, tmp = self.rco_exp(body, need_atomic=False) # it's ok for need_atomic=True ?
                     stmts = []
@@ -409,7 +377,7 @@ class Compiler:
                     tmpVars.append((tmp, Subscript(tup, Constant(index), Load())))
                     return tmp, tmpVars
                 else:
-                    return Subscript(tup, Constant(index), Load()), []
+                    return Subscript(tup, Constant(index), Load()), tmpVars
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
 

@@ -8,10 +8,10 @@ conclusion:
     retq 
 
 	.align 16
-block.11:
+block.8:
     movq free_ptr(%rip), %r11
     addq $32, free_ptr(%rip)
-    movq $519, 0(%r11)
+    movq $7, 0(%r11)
     movq %r11, %rcx
     movq %rcx, %r11
     movq -8(%rbp), %rax
@@ -22,19 +22,23 @@ block.11:
     movq -16(%rbp), %rax
     movq %rax, 24(%r11)
     movq %rcx, %r11
-    movq 8(%r11), %rcx
+    movq 8(%r11), %rbx
+    movq %rbx, %rdi
+    callq print_int
+    movq %rcx, %r11
+    movq 24(%r11), %rcx
     movq %rcx, %rdi
     callq print_int
     jmp conclusion
 
 	.align 16
-block.12:
+block.9:
     movq %r15, %rdi
     movq $32, %rsi
     callq collect
     movq free_ptr(%rip), %r11
     addq $32, free_ptr(%rip)
-    movq $519, 0(%r11)
+    movq $7, 0(%r11)
     movq %r11, %rcx
     movq %rcx, %r11
     movq -8(%rbp), %rax
@@ -45,56 +49,25 @@ block.12:
     movq -16(%rbp), %rax
     movq %rax, 24(%r11)
     movq %rcx, %r11
-    movq 8(%r11), %rcx
+    movq 8(%r11), %rbx
+    movq %rbx, %rdi
+    callq print_int
+    movq %rcx, %r11
+    movq 24(%r11), %rcx
     movq %rcx, %rdi
     callq print_int
     jmp conclusion
 
 	.align 16
-block.13:
-    movq free_ptr(%rip), %r11
-    addq $16, free_ptr(%rip)
-    movq $3, 0(%r11)
-    movq %r11, %rcx
-    movq %rcx, %r11
-    movq %rbx, 8(%r11)
-    movq $40, -8(%rbp)
-    movq $1, %rbx
-    movq %rcx, -16(%rbp)
-    movq free_ptr(%rip), %rcx
-    addq $32, %rcx
-    cmpq fromspace_end(%rip), %rcx
-    jl block.11
-    jmp block.12
-
-	.align 16
-block.14:
-    movq %r15, %rdi
-    movq $16, %rsi
-    callq collect
-    movq free_ptr(%rip), %r11
-    addq $16, free_ptr(%rip)
-    movq $3, 0(%r11)
-    movq %r11, %rcx
-    movq %rcx, %r11
-    movq %rbx, 8(%r11)
-    movq $40, -8(%rbp)
-    movq $1, %rbx
-    movq %rcx, -16(%rbp)
-    movq free_ptr(%rip), %rcx
-    addq $32, %rcx
-    cmpq fromspace_end(%rip), %rcx
-    jl block.11
-    jmp block.12
-
-	.align 16
 start:
-    movq $2, %rbx
+    movq $42, -8(%rbp)
+    movq $1, %rbx
+    movq $2, -16(%rbp)
     movq free_ptr(%rip), %rcx
-    addq $16, %rcx
+    addq $32, %rcx
     cmpq fromspace_end(%rip), %rcx
-    jl block.13
-    jmp block.14
+    jl block.8
+    jmp block.9
 
 	.globl main
 	.align 16

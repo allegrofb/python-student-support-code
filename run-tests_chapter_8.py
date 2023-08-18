@@ -17,7 +17,7 @@ typecheck_dict = {
     'shrink': typecheck_Lfun,
     'reveal_functions': typecheck_Lfun,
     'limit_functions': typecheck_Lfun,
-    # 'expose_allocation': typecheck_Lfun,
+    'expose_allocation': typecheck_Lfun,
     'remove_complex_operands': typecheck_Lfun,
     'explicate_control': typecheck_Cfun,
 }
@@ -27,7 +27,7 @@ interp_dict = {
     'shrink': interpLfun,
     'reveal_functions': interpLfun,
     'limit_functions': interpLfun,
-    # 'expose_allocation': interpLfun,
+    'expose_allocation': interpLfun,
     'remove_complex_operands': interpLfun,
     'explicate_control': interpCfun,
     'select_instructions': interp_x86,

@@ -33,6 +33,22 @@ def mk_tag(typ: Type) -> int:
     print("********************",bits)
     return int(bits, 2)
 
+def mk_array_tag(length: int, typ: Type) -> int:
+    # extra 64 bits:
+    # bit 0     : 0 - entire tag is a forwarding pointer
+    # bit 1     : pointer mask, 0 indicates that none of the
+    #             elements are pointers to the heap, and 
+    # 			a 1 indicates that all the elements are pointers.
+    # bit 2-61  : length of the array
+    # bit 62    : 0 - tuple, 1 - array
+    # bit 63    : unused
+    if not isinstance(typ, ListType):
+        raise Exception(f"Expected a ListType, got {typ}")
+    pointer_mask = "1" if isinstance(typ.elt_type, ListType) else "0"
+    bits = f"1{length:060b}{pointer_mask:>0{1}}1"
+    print("********************",bits)
+    return int(bits, 2)
+
 def is_pointer(typ: Type) -> bool:
     return isinstance(typ, TupleType)
 
@@ -84,8 +100,6 @@ class Compiler:
             case While(test, body, []):
                 return While(self.shrink_exp(test),
                           [self.shrink_stmt(i) for i in body], [])
-            case Return(value):
-                return Return(self.shrink_exp(value))
             case _:
                 raise Exception('error in shrink_stmt, unexpected ' + repr(s))
 
@@ -93,132 +107,67 @@ class Compiler:
         match p:
             case Module(body):
                 new_body = []
-                main_body = []
                 for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            new_bod = []
-                            for s in bod:
-                                new_bod.append(self.shrink_stmt(s))
-                            new_body.append(FunctionDef(name, params, new_bod, dl, returns, comment))
-                        case _:
-                            main_body.append(self.shrink_stmt(stmt))
-                main_body.append(Return(Constant(0)))
-                new_body.append(FunctionDef('main', [], main_body, None, IntType(), None))
+                    new_body.append(self.shrink_stmt(stmt))
                 print(new_body)
                 return Module(new_body)
             case _:
                 raise Exception('error in shrink, unexpected ' + repr(p))
 
-
     ############################################################################
-    # Reveal Functions
+    # Resolve
     ############################################################################
 
-    def reveal_exp(self, e: expr, func_refs: Dict) -> expr:
+    def resolve_exp(self, e: expr) -> expr:
         # YOUR CODE HERE
         match e:
-            case Name(n):
-                if n in func_refs:
-                    return FunRef(n, func_refs[n])
-                return Name(n)
-            case BinOp(left, Add(), right):
-                return BinOp(self.reveal_exp(left, func_refs), Add(), self.reveal_exp(right, func_refs))
-            case BinOp(left, Sub(), right):
-                return BinOp(self.reveal_exp(left, func_refs), Sub(), self.reveal_exp(right, func_refs))
-            case UnaryOp(USub(), v):
-                return UnaryOp(USub(), self.reveal_exp(v, func_refs))
+            case BinOp(left, op, right):
+                return BinOp(self.resolve_exp(left), op, self.resolve_exp(right))
+            case UnaryOp(op, v):
+                return UnaryOp(op, self.resolve_exp(v))
             case IfExp(test, body, orelse):
-                return IfExp(self.reveal_exp(test, func_refs), self.reveal_exp(body, func_refs), self.reveal_exp(orelse, func_refs))
-            case UnaryOp(Not(), v):
-                return UnaryOp(Not(), self.reveal_exp(v, func_refs))
-            case BoolOp(And(), values):
-                return UnaryOp(And(), self.reveal_exp(v, func_refs))
-            case BoolOp(Or(), values):
-                return BoolOp(Or(), [self.reveal_exp(i, func_refs) for i in values])
+                return IfExp(self.resolve_exp(test), self.resolve_exp(body), self.resolve_exp(orelse))
+            case BoolOp(op, values):
+                return BoolOp(op, [self.resolve_exp(i) for i in values])
             case Compare(left, [cmp], [right]):
-                return Compare(self.reveal_exp(left, func_refs), [cmp], [self.reveal_exp(right, func_refs)])
-            case Call(func, args):
-                return Call(self.reveal_exp(func, func_refs), [self.reveal_exp(i, func_refs) for i in args])
-            case Constant(v):
-                return Constant(v)
+                return Compare(self.resolve_exp(left), [cmp], [self.resolve_exp(right)])
+            case Call(Name('len'), [arg]):
+                if isinstance(arg.has_type, (ListType,)):
+                    return Call(Name('array_len'), [arg])
+                return Call(Name('len'), [arg])
             case _:
-                raise Exception('error in reveal_exp, unexpected ' + repr(e))
+                return e
 
-    def reveal_stmt(self, s: stmt, func_refs: Dict) -> stmt:
+    def resolve_stmt(self, s: stmt) -> stmt:
         # YOUR CODE HERE
         match s:
             case If(test, body, orelse):
-                return If(self.reveal_exp(test), 
-                            [self.reveal_stmt(i, func_refs) for i in body], 
-                            [self.reveal_stmt(i, func_refs) for i in orelse])
+                return If(self.resolve_exp(test), 
+                            [self.resolve_stmt(i) for i in body], 
+                            [self.resolve_stmt(i) for i in orelse])
             case Assign([Name(id)], value):
-                return Assign([Name(id)], self.reveal_exp(value, func_refs))
+                return Assign([Name(id)], self.resolve_exp(value))
             case Expr(Call(Name('print'), [arg])):
-                return Expr(Call(Name('print'), [self.reveal_exp(arg, func_refs)]))
+                return Expr(Call(Name('print'), [self.resolve_exp(arg)]))
             case Expr(value):
-                return Expr(self.reveal_exp(value, func_refs))
+                return Expr(self.resolve_exp(value))
             case While(test, body, []):
-                return While(self.reveal_exp(test, func_refs),
-                          [self.reveal_stmt(i, func_refs) for i in body], [])
-            case Return(value):
-                return Return(self.reveal_exp(value, func_refs))
+                return While(self.resolve_exp(test),
+                          [self.resolve_stmt(i) for i in body], [])
             case _:
-                raise Exception('error in reveal_stmt, unexpected ' + repr(s))
+                raise Exception('error in resolve_stmt, unexpected ' + repr(s))
 
-    def reveal_functions(self, p: Module) -> Module:
+    def resolve(self, p: Module) -> Module:
         match p:
             case Module(body):
                 new_body = []
-
-                func_refs = {}
-                arity = 0
                 for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            func_refs[name] = arity
-                        case _:
-                            raise Exception('error in reveal_functions, unexpected ' + repr(stmt))
-                    arity += 1
-
-                for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            new_bod = []
-                            for s in bod:
-                                new_bod.append(self.reveal_stmt(s, func_refs))
-                            new_body.append(FunctionDef(name, params, new_bod, dl, returns, comment))
-                        case _:
-                            raise Exception('error in reveal_functions, unexpected ' + repr(stmt))
+                    new_body.append(self.resolve_stmt(stmt))
                 print(new_body)
                 return Module(new_body)
             case _:
-                raise Exception('error in reveal_functions, unexpected ' + repr(p))
+                raise Exception('error in resolve, unexpected ' + repr(p))
 
-
-    ############################################################################
-    # Limit Functions
-    ############################################################################
-
-
-    # def limit_functions(self, p: Module) -> Module:
-    #     match p:
-    #         case Module(body):
-    #             new_body = []
-
-    #             for stmt in body:
-    #                 match stmt:
-    #                     case FunctionDef(name, params, bod, dl, returns, comment):
-    #                         new_bod = []
-    #                         for s in bod:
-    #                             new_bod.append(self.limit_stmt(s))
-    #                         new_body.append(FunctionDef(name, params, new_bod, dl, returns, comment))
-    #                     case _:
-    #                         raise Exception('error in limit_functions, unexpected ' + repr(stmt))
-    #             print(new_body)
-    #             return Module(new_body)
-    #         case _:
-    #             raise Exception('error in limit_functions, unexpected ' + repr(p))
     ############################################################################
     # Expose Allocation
     ############################################################################
@@ -232,8 +181,10 @@ class Compiler:
                 return BinOp(left, cmp, right), ss+ss2
             # case UnaryOp(USub(), v):
             #     return UnaryOp(USub(), v), tmpVars
-            # case Compare(left, [cmp], [right]):
-            #     return Compare(left, [cmp], [right]), tmpVars
+            case Compare(left, [cmp], [right]):
+                left, ss = self.expose_exp(left)
+                right, ss2 = self.expose_exp(right)
+                return Compare(left, [cmp], [right]), ss+ss2
             case IfExp(test, body, orelse):
                 test, ss = self.expose_exp(test)
                 body, ss2 = self.expose_exp(body)
@@ -243,9 +194,61 @@ class Compiler:
                 return Name(id), []
             case Constant(value):
                 return Constant(value), []
+            case Subscript(tup, index, Load()):
+                tup,ss = self.expose_exp(tup)
+                index,ss2 = self.expose_exp(index)
+                return Subscript(tup, index, Load()), ss+ss2
             case Subscript(tup, Constant(index), Load()):
                 tup,ss = self.expose_exp(tup)
                 return Subscript(tup, Constant(index), Load()), ss
+            case Call(Name(id), [arg]):
+                arg,ss = self.expose_exp(arg)
+                return Call(Name(id),[arg]), ss
+            case ast.List(es, Load()):
+                # x0 = e0
+                # ...
+                # xn–1 = en–1
+                # if global_value(free_ptr) + bytes < global_value(fromspace_end):
+                # 	0
+                # else:
+                # 	collect(bytes)          //<---------- collect function c code
+                # v = allocate(len, type)     //<---------- allocate function c code
+                # v[0] = x0                   //<---------- access array
+                # ...
+                # v[n – 1] = xn–1
+                # v                           //<---------- v array varialbe
+                stmts = []
+                ts = []
+                ss = []
+                for e in es:
+                    tmp = Name(generate_name('tmpVar'))
+                    match e:
+                        case Constant(value) if isinstance(value, bool):
+                            ts.append((tmp,BoolType()))
+                        case Constant(value):
+                            ts.append((tmp,IntType()))
+                        case ast.Tuple(value):
+                            ts.append((tmp,e.has_type))
+                            e, ss = self.expose_exp(e)
+                        case _:
+                            raise Exception('error in expose_exp, unexpected ' + repr(e))
+                    stmts.append(Assign([tmp], e))
+
+                bytes = Constant(len(ts)*8 + 8)
+                fromspace_end = GlobalValue('fromspace_end')
+                free_ptr = GlobalValue('free_ptr')
+                test = Compare(BinOp(free_ptr, Add(), bytes), [Lt()], [fromspace_end])
+                orelse = [Collect(bytes)]  # Collect function should be stmt
+                stmts.append(If(test,[],orelse))
+
+                v = Name(generate_name('tmpVar'))
+                stmts.append(Assign([v], AllocateArray(len(ts), ListType(ts[0][1]))))
+
+                for index,i in enumerate(ts):
+                    stmts.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
+
+                return v, ss+stmts
+
             case ast.Tuple(es, Load()):
                 # x0 = e0
                 # ...
@@ -292,14 +295,6 @@ class Compiler:
 
                 return v, ss+stmts
 
-            case Call(FunRef(name, arity), args):
-                stmts = []
-                arguments = []
-                for arg in args:
-                    aa, ss = self.expose_exp(arg)
-                    stmts.extend(ss)
-                    arguments.append(aa)
-                return Call(FunRef(name, arity), arguments), stmts
             case _:
                 # return e, []
                 raise Exception('error in expose_exp, unexpected ' + repr(e))
@@ -313,9 +308,6 @@ class Compiler:
             case Expr(Call(Name('print'), [arg])):
                 arg, ss = self.expose_exp(arg)
                 return ss + [Expr(Call(Name('print'), [arg]))]
-            case Return(value):
-                value, ss = self.expose_exp(value)
-                return ss+[Return(value)]
             # case Assign([Subscript(tup, Constant(index), Store())], value):                
             #     return
             # case Expr(value):
@@ -338,16 +330,15 @@ class Compiler:
             #         orelse_stmts.extend(self.expose_stmt(i))
             #     stmts.append(If(test,body_stmts,orelse_stmts))
             #     return stmts
-            # case While(test, body, []):
-            #     stmts = []
-            #     test, tmp = self.expose_exp(test)
-            #     for i in tmp:
-            #         stmts.append(Assign([i[0]], i[1]))
-            #     body_stmts = []
-            #     for i in body:
-            #         body_stmts.extend(self.expose_stmt(i))
-            #     stmts.append(While(test,body_stmts,[]))
-            #     return stmts
+            case While(test, body, []):
+                stmts = []
+                test, ss = self.expose_exp(test)
+                stmts += ss
+                body_stmts = []
+                for i in body:
+                    body_stmts.extend(self.expose_stmt(i))
+                stmts.append(While(test,body_stmts,[]))
+                return stmts
             case _:
                 raise Exception('error in expose_stmt, unexpected ' + repr(s))
 
@@ -357,14 +348,7 @@ class Compiler:
             case Module(body):
                 new_body = []
                 for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            new_bod = []
-                            for s in bod:
-                                new_bod.extend(self.expose_stmt(s))
-                            new_body.append(FunctionDef(name, params, new_bod, dl, returns, comment))
-                        case _:
-                            raise Exception('error in expose_allocation, unexpected ' + repr(stmt))
+                    new_body.extend(self.expose_stmt(stmt))
                 print(new_body)
                 return Module(new_body)
             case _:
@@ -389,24 +373,19 @@ class Compiler:
                     return tmp, tmpVars
                 else:
                     return Call(Name('input_int'), []), tmpVars
-            case Call(func, args):
+            case Call(Name(name), [arg]):   # len or array_len
                 tmpVars = []
-                tmp_args = []
-                for arg in args:
-                    if not isinstance(arg, (Name, Constant, GlobalValue, )):
-                        arg2, tmp = self.rco_exp(arg, need_atomic=True)
-                        tmpVars.extend(tmp)
-                        arg = Name(generate_name('tmpVar'))
-                        tmpVars.append((arg, arg2))
-                        tmp_args.append(arg)
-                    else:
-                        tmp_args.append(arg)
+                if not isinstance(arg, (Name, Constant, GlobalValue, )):
+                    arg2, tmp = self.rco_exp(arg, need_atomic=False)
+                    tmpVars.extend(tmp)
+                    arg = Name(generate_name('tmpVar'))
+                    tmpVars.append((arg, arg2))
                 if need_atomic:
                     tmp = Name(generate_name('tmpVar'))
-                    tmpVars.append((tmp, Call(func, tmp_args)))
+                    tmpVars.append((tmp, Call(Name(name), [arg])))
                     return tmp, tmpVars
                 else:
-                    return Call(func, tmp_args), tmpVars
+                    return Call(Name(name), [arg]), tmpVars
             case BinOp(left, Add(), right):
                 tmpVars = []
                 if not isinstance(left, (Name, Constant, GlobalValue, )):
@@ -443,6 +422,24 @@ class Compiler:
                     return tmp, tmpVars
                 else:
                     return BinOp(left, Sub(), right), tmpVars
+            case BinOp(left, Mult(), right):
+                tmpVars = []
+                if not isinstance(left, (Name, Constant, GlobalValue, )):
+                    left2, tmp = self.rco_exp(left, need_atomic=False)
+                    tmpVars.extend(tmp)
+                    left = Name(generate_name('tmpVar'))
+                    tmpVars.append((left, left2))
+                if not isinstance(right, (Name, Constant, GlobalValue,)):
+                    right2, tmp = self.rco_exp(right, need_atomic=False)
+                    tmpVars.extend(tmp)
+                    right = Name(generate_name('tmpVar'))                        
+                    tmpVars.append((right, right2))
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, BinOp(left, Mult(), right)))
+                    return tmp, tmpVars
+                else:
+                    return BinOp(left, Mult(), right), tmpVars
             case UnaryOp(USub(), v):
                 tmpVars = []
                 if not isinstance(v, (Name, Constant, GlobalValue,)):
@@ -522,6 +519,24 @@ class Compiler:
                 for s in body:
                     stmts.extend(self.rco_stmt(s))
                 return Begin(stmts, result), tmpVars
+            case Subscript(tup, index, Load()):
+                tmpVars = []
+                if not isinstance(index, (Name, Constant, GlobalValue,)):
+                    index2, tmp = self.rco_exp(index, need_atomic=True)
+                    tmpVars.extend(tmp)
+                    index = Name(generate_name('tmpVar'))
+                    tmpVars.append((index, index2))
+                if not isinstance(tup, (Name, Constant, GlobalValue,)):
+                    tup2, tmp = self.rco_exp(tup, need_atomic=True)
+                    tmpVars.extend(tmp)
+                    tup = Name(generate_name('tmpVar'))
+                    tmpVars.append((tup, tup2))
+                if need_atomic:
+                    tmp = Name(generate_name('tmpVar'))
+                    tmpVars.append((tmp, Subscript(tup, index, Load())))
+                    return tmp, tmpVars
+                else:
+                    return Subscript(tup, index, Load()), tmpVars
             case Subscript(tup, Constant(index), Load()):
                 tmpVars = []
                 if not isinstance(tup, (Name, Constant, GlobalValue,)):
@@ -535,6 +550,8 @@ class Compiler:
                     return tmp, tmpVars
                 else:
                     return Subscript(tup, Constant(index), Load()), tmpVars
+            case AllocateArray(exp, typ):
+                return AllocateArray(exp, typ), []
             case _:
                 raise Exception('error in rco_exp, unexpected ' + repr(e))
 
@@ -599,13 +616,6 @@ class Compiler:
                     body_stmts.extend(self.rco_stmt(i))
                 stmts.append(While(test,body_stmts,[]))
                 return stmts
-            case Return(value):
-                stmts = []
-                value, tmp = self.rco_exp(value, need_atomic=True)
-                for i in tmp:
-                    stmts.append(Assign([i[0]], i[1]))
-                stmts.append(Return(value))
-                return stmts
             case _:
                 raise Exception('error in rco_stmt, unexpected ' + repr(s))
 
@@ -615,14 +625,7 @@ class Compiler:
             case Module(body):
                 new_body = []
                 for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            new_bod = []
-                            for s in bod:
-                                new_bod.extend(self.rco_stmt(s))
-                            new_body.append(FunctionDef(name, params, new_bod, dl, returns, comment))
-                        case _:
-                            raise Exception('error in remove_complex_operands, unexpected ' + repr(stmt))
+                    new_body.extend(self.rco_stmt(stmt))
                 print(new_body)
                 return Module(new_body)
             case _:
@@ -644,7 +647,7 @@ class Compiler:
                 body = self.explicate_effect(body, cont, basic_blocks)
                 orelse = self.explicate_effect(orelse, cont, basic_blocks)
                 return self.explicate_pred(test, body, orelse, basic_blocks) + cont
-            case Call(func, args):
+            case Call(func, args):   # input_int, len, array_len
             # case Call(Name('input_int'), args):
                 # for arg in args:
                 #     self.explicate_effect(arg, cont, basic_blocks)
@@ -684,9 +687,6 @@ class Compiler:
                 for s in reversed(body):
                     new_body = self.explicate_stmt(s, new_body, basic_blocks)
                 return new_body
-            # case Call(FunRef(name='inc', arity=0), [Constant(41)]):
-            # case Call(func, args):
-            #     return
             case _:
                 return [Assign([lhs], rhs)] + cont
                 
@@ -714,21 +714,6 @@ class Compiler:
                 return [If(Compare(cnd, [Eq()], [Constant(False)]),
                         [self.create_block(els, basic_blocks)],
                         [self.create_block(thn, basic_blocks)])]
-    
-    def explicate_tail(self, e: expr, cont: List[stmt], basic_blocks: Dict) -> List[stmt]:
-        match e:
-            case IfExp(test, body, orelse):
-                body = self.explicate_effect(body, cont, basic_blocks)
-                orelse = self.explicate_effect(orelse, cont, basic_blocks)
-                return self.explicate_pred(test, body, orelse, basic_blocks) + cont
-            case Call(func, args):
-                return [Expr(Call(func, args))] + cont
-            case Begin(body, result):
-                for s in body:
-                    cont.extend(self.explicate_stmt(s, [], basic_blocks))
-                return Return(result)
-            case _:
-                return [Return(e)] + cont
 
     def explicate_stmt(self, s: stmt, cont: List[stmt], basic_blocks: Dict) -> List[stmt]:
         match s:
@@ -757,28 +742,20 @@ class Compiler:
                 return [Goto(label)]
             case Collect(size):
                 return [Collect(size)] + cont
-            case Return(expr):
-                return self.explicate_tail(expr, cont, basic_blocks)
             case _:
                 raise Exception('error in explicate_stmt, unexpected ' + repr(s))
 
-    def explicate_control(self, p: Module) -> CProgramDefs:
+    def explicate_control(self, p: Module) -> CProgram:
         match p:
             case Module(body):
-                new_body = []
-                for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            basic_blocks = {}
-                            new_bod = []
-                            for s in reversed(bod):
-                                new_bod = self.explicate_stmt(s, new_bod, basic_blocks)
-                            basic_blocks[label_name(name+"_start")] = new_bod
-                            new_body.append(FunctionDef(name, params, basic_blocks, None, returns, None))
-                        case _:
-                            raise Exception('error in remove_complex_operands, unexpected ' + repr(stmt))
-                print(new_body)
-                return CProgramDefs(new_body)
+                basic_blocks = {}
+                basic_blocks[label_name('conclusion')] = [Return(Constant(0))]
+                new_body = [Goto(label_name('conclusion'))]
+                for s in reversed(body):
+                    new_body = self.explicate_stmt(s, new_body, basic_blocks)
+                basic_blocks[label_name('start')] = new_body
+                print(basic_blocks)
+                return CProgram(basic_blocks)
 
     ############################################################################
     # Select Instructions
@@ -788,7 +765,11 @@ class Compiler:
         # YOUR CODE HERE
         match e:
             case Name(n):
-                return Variable(n)
+                v = Variable(n)
+                if hasattr(e, 'has_type'):  # var_types ???
+                    print(e.has_type)
+                    # setattr(v, 'var_types', e.has_type)
+                return v
             case Constant(v):
                 return Immediate(int(v))
             case GlobalValue(name):
@@ -815,15 +796,6 @@ class Compiler:
                         instrs.append(Callq(label_name("read_int"), 0))
                         instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
                         return instrs
-                    case Call(FunRef(name, arity), args):
-                        param_regs = [Reg(i) for i in 'rdi rsi rdx rcx r8 r9'.split(' ')]
-                        instrs = []
-                        for i,a in enumerate(args):
-                            instrs.append(Instr('movq', [self.select_arg(a), param_regs[i]]))
-                        # instrs.append(Callq(label_name(name+'_start'), len(args)))
-                        instrs.append(Callq(label_name(name), len(args)))
-                        instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
-                        return instrs
                     case BinOp(left, Add(), right):
                         instrs = []
                         instrs.append(Instr('movq', [self.select_arg(left), self.select_arg(arg)]))
@@ -833,6 +805,11 @@ class Compiler:
                         instrs = []
                         instrs.append(Instr('movq', [self.select_arg(left), self.select_arg(arg)]))
                         instrs.append(Instr('subq', [self.select_arg(right), self.select_arg(arg)]))
+                        return instrs
+                    case BinOp(left, Mult(), right):
+                        instrs = []
+                        instrs.append(Instr('movq', [self.select_arg(left), self.select_arg(arg)]))
+                        instrs.append(Instr('imull', [self.select_arg(right), self.select_arg(arg)]))
                         return instrs
                     case UnaryOp(USub(), v):
                         instrs = []
@@ -850,6 +827,15 @@ class Compiler:
                         instrs.append(Instr('movq', [self.select_arg(tup), Reg('r11')]))
                         instrs.append(Instr('movq', [Deref('r11', 8*(index+1)), self.select_arg(arg)]))
                         return instrs
+                    case Subscript(array, index, Load()):
+                        instrs = []
+                        instrs.append(Instr('movq', [self.select_arg(array), Reg('r11')]))
+                        instrs.append(Instr('addq', [Immediate(1), self.select_arg(index)]))
+                        instrs.append(Instr('imull', [Immediate(8), self.select_arg(index)]))
+                        # interp_x86.eval_x86 didn't support imull ????
+                        instrs.append(Instr('addq', [self.select_arg(index), Reg('r11')]))
+                        instrs.append(Instr('movq', [Deref('r11', 0), self.select_arg(arg)]))
+                        return instrs
                     case Allocate(length, ty):
                         instrs = []
                         instrs.append(Instr('movq', [Global('free_ptr'), Reg('r11')]))
@@ -857,6 +843,20 @@ class Compiler:
                         tag = mk_tag(ty)
                         instrs.append(Instr('movq', [Immediate(tag), Deref('r11', 0)]))
                         instrs.append(Instr('movq', [Reg('r11'), self.select_arg(arg)]))
+                        return instrs
+                    case AllocateArray(length, ty):
+                        instrs = []
+                        instrs.append(Instr('movq', [Global('free_ptr'), Reg('r11')]))
+                        instrs.append(Instr('addq', [Immediate(8*(length + 1)), Global('free_ptr')]))
+                        tag = mk_array_tag(length, ty)
+                        instrs.append(Instr('movq', [Immediate(tag), Deref('r11', 0)]))
+                        instrs.append(Instr('movq', [Reg('r11'), self.select_arg(arg)]))
+                        return instrs
+                    case Call(Name('array_len'), [lis]):
+                        instrs = []
+                        instrs.append(Instr('movq', [self.select_arg(lis), Reg('r11')]))
+                        instrs.append(Instr('movq', [Deref('r11', 0), self.select_arg(arg)]))
+                        # todo, get length from tag
                         return instrs
                     case Name(n):
                         instrs = []
@@ -920,31 +920,23 @@ class Compiler:
             case _:
                 raise Exception('error in select_stmt, unexpected ' + repr(s))
 
-    def select_instructions(self, p: CProgramDefs) -> X86ProgramDefs:
+    def select_instructions(self, p: CProgram) -> X86Program:
         # YOUR CODE HERE
         match p:
-            case CProgramDefs(body):
-                result = []
-                for stmt in body:
-                    match stmt:
-                        case FunctionDef(name, params, bod, dl, returns, comment):
-                            basic_blocks = {}
-                            for l,ss in bod.items():
-                                instrs = []
-                                for s in ss:
-                                    # print(s)
-                                    instrs.extend(self.select_stmt(s))
-                                basic_blocks[l] = instrs
-                            param_instrs = []
-                            param_regs = [Reg(i) for i in 'rdi rsi rdx rcx r8 r9'.split(' ')]
-                            for i, p in enumerate(params):
-                                param_instrs.append(Instr('movq', [param_regs[i], Variable(p[0])]))
-                            basic_blocks[name+"_start"] = param_instrs + basic_blocks[name+"_start"]
-                            result.append(FunctionDef(name, [], basic_blocks, None, returns, None))
-                        case _:
-                            raise Exception('error in select_instructions, unexpected ' + repr(stmt))
-                print(result)
-                return X86ProgramDefs(result)
+            case CProgram(body):
+                result = dict()
+                for l,stmts in body.items():
+                    instrs = []
+                    for stmt in stmts:
+                        # print(stmt)
+                        instrs.extend(self.select_stmt(stmt))
+                    result[l] = instrs
+                instrs = []
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
+                instrs.append(Callq(label_name("initialize"), 2))
+                result['start'] = instrs + result['start']
+                return X86Program(result)
             case _:
                 raise Exception('error in select_instructions, unexpected ' + repr(p))
 
@@ -1002,58 +994,49 @@ class Compiler:
             case _:
                 raise Exception('error in write_vars, unexpected ' + repr(i))
 
-    def uncover_live(self, p: X86ProgramDefs) -> Dict[str, Dict[instr, Set[location]]]:
+    def uncover_live(self, p: X86Program) -> Dict[instr, Set[location]]:
         # YOUR CODE HERE
         match p:
-            case X86ProgramDefs(defs):
-                result = {}
-                for stmt in defs:
-                    match stmt:
-                        case FunctionDef(name, params, body, dl, returns, comment):
-                            graph = DirectedAdjList() # control flow graph (CFG)
-                            worklist = deque([name+"_start"])
-                            visited = set()
-                            while worklist:
-                                head = worklist.popleft()
-                                if head in visited:
-                                    continue
-                                visited.add(head)
-                                for instr in body[head]:
-                                    if isinstance(instr, (Jump, JumpIf)):
-                                        graph.add_edge(instr.label, head)
-                                        worklist.append(instr.label)
+            case X86Program(body):
+                graph = DirectedAdjList() # control flow graph (CFG)
+                worklist = deque(['start'])
+                visited = set()
+                while worklist:
+                    head = worklist.popleft()
+                    if head in visited:
+                        continue
+                    visited.add(head)
+                    for instr in body[head]:
+                        if isinstance(instr, (Jump, JumpIf)):
+                            graph.add_edge(instr.label, head)
+                            worklist.append(instr.label)
 
-                            def transfer(node: str, live_after: set[location]) -> set[location]:
-                                for instr in reversed(body[node]):
-                                    if not isinstance(instr, (Jump, JumpIf)):
-                                        r_set = self.read_vars(instr)
-                                        w_set = self.write_vars(instr)
-                                        live_after = (live_after - w_set) | r_set
-                                return live_after
+                def transfer(node: str, live_after: set[location]) -> set[location]:
+                    for instr in reversed(body[node]):
+                        if not isinstance(instr, (Jump, JumpIf)):
+                            r_set = self.read_vars(instr)
+                            w_set = self.write_vars(instr)
+                            live_after = (live_after - w_set) | r_set
+                    return live_after
 
-                            live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
-                            if len(live_before_block.keys()) == 0:
-                                live_before_block[name+"_start"] = set()
+                live_before_block = analyze_dataflow(graph, transfer, set(), lambda a, b: a | b)
 
-                            instr_dict = {}
-                            after = set()
-                            for v in live_before_block:
-                                for i in reversed(body[v]):
-                                    if isinstance(i, (Jump, JumpIf)):
-                                        # print(v, 'jump to: ',graph.out[v])
-                                        instr_dict[i] = live_before_block[i.label]
-                                        after = live_before_block[i.label]
-                                    else:
-                                        instr_dict[i] = after
-                                    r = self.read_vars(i)
-                                    w = self.write_vars(i)
-                                    before = (after - w).union(r)
-                                    after = before
-                            result[name] = instr_dict
-                        case _:
-                            raise Exception('error in select_instructions, unexpected ' + repr(stmt))
+                instr_dict = {}
+                after = set()
+                for v in live_before_block:
+                    for i in reversed(body[v]):
+                        if isinstance(i, (Jump, JumpIf)):
+                            # print(v, 'jump to: ',graph.out[v])
+                            instr_dict[i] = live_before_block[i.label]
+                            after = live_before_block[i.label]
+                        else:
+                            instr_dict[i] = after
+                        r = self.read_vars(i)
+                        w = self.write_vars(i)
+                        before = (after - w).union(r)
+                        after = before
+                return instr_dict
 
-                return result
             case _:
                 raise Exception('error in uncover_live, unexpected ' + repr(p))
 
@@ -1061,36 +1044,24 @@ class Compiler:
     # Build Interference
     ############################################################################
 
-    def build_interference(self, p: X86ProgramDefs,
-                           live_after: Dict[str, Dict[instr, Set[location]]]) -> Dict[str, UndirectedAdjList]:
+    def build_interference(self, p: X86Program,
+                           live_after: Dict[instr, Set[location]]) -> UndirectedAdjList:
         # YOUR CODE HERE
-        match p:
-            case X86ProgramDefs(defs):
-                result = {}
-                for stmt in defs:
-                    match stmt:
-                        case FunctionDef(name, params, body, dl, returns, comment):
-                            graph = UndirectedAdjList()
-                            for l, ss in body.items():
-                                for i in ss:
-                                    match i:
-                                        case Instr('movq', [s,d]):
-                                            for v in live_after[name][i]:
-                                                if v != s and v != d:
-                                                    graph.add_edge(d,v)
-                                        case _:
-                                            w = self.write_vars(i)
-                                            for d in w:
-                                                for v in live_after[name][i]:
-                                                    if d != v:
-                                                        graph.add_edge(d,v)
-                            result[name] = graph
-                        case _:
-                            raise Exception('error in build_interference, unexpected ' + repr(stmt))
-                return result
-            case _:
-                raise Exception('error in build_interference, unexpected ' + repr(p))
-        
+        graph = UndirectedAdjList()
+        for l, ss in p.body.items():
+            for i in ss:
+                match i:
+                    case Instr('movq', [s,d]):
+                        for v in live_after[i]:
+                            if v != s and v != d:
+                                graph.add_edge(d,v)
+                    case _:
+                        w = self.write_vars(i)
+                        for d in w:
+                            for v in live_after[i]:
+                                if d != v:
+                                    graph.add_edge(d,v)
+        return graph
 
     ############################################################################
     # Allocate Registers
@@ -1135,65 +1106,53 @@ class Compiler:
         # print(L)
         return color, variables
 
-    def allocate_registers(self, p: X86ProgramDefs,
-                           graph: Dict[str, UndirectedAdjList]) -> X86ProgramDefs:
+    def allocate_registers(self, p: X86Program,
+                           graph: UndirectedAdjList) -> X86Program:
         # YOUR CODE HERE
-
-        result = []
-        for stmt in p.defs:
-            match stmt:
-                case FunctionDef(name, params, bod, dl, returns, comment):
-
-                    var = graph[name].vertices()
-                    # print(var)
-                    color, var = self.color_graph(graph[name], var) # call coloring algorithm, get coloring variables
-                    # print(color)
-                    body = {}
-                    for l, ss in bod.items():
-                        instrs = []
-                        for i in ss:
-                            match i:
-                                case Instr(n, [arg]):
-                                    if arg in color:
-                                        if color[arg] == 0:
-                                            arg = Reg('rcx')
-                                        elif color[arg] == 1:
-                                            arg = Reg('rbx')
-                                        elif color[arg] > 1:
-                                            arg = Deref('rbp',-(color[arg]-1)*8)
-                                    elif isinstance(arg, Variable):
-                                        arg = Reg('rcx')
-                                    instrs.append(Instr(n,[arg]))
-                                case Instr(n, [arg1,arg2]):
-                                    if arg1 in color:
-                                        if color[arg1] == 0:
-                                            arg1 = Reg('rcx')
-                                        elif color[arg1] == 1:
-                                            arg1 = Reg('rbx')
-                                        elif color[arg1] > 1:
-                                            arg1 = Deref('rbp',-(color[arg1]-1)*8)
-                                    elif isinstance(arg1, Variable):
-                                        arg1 = Reg('rcx')
-                                    if arg2 in color:
-                                        if color[arg2] == 0:
-                                            arg2 = Reg('rcx')
-                                        elif color[arg2] == 1:
-                                            arg2 = Reg('rbx')
-                                        elif color[arg2] > 1:
-                                            arg2 = Deref('rbp',-(color[arg2]-1)*8)
-                                    elif isinstance(arg2, Variable):
-                                        arg2 = Reg('rcx')
-                                    instrs.append(Instr(n,[arg1,arg2]))
-                                case _:
-                                    instrs.append(i)                            
-                        body[l] = instrs
-
-                    result.append(FunctionDef(name, params, body, dl, returns, comment))
-
-                case _:
-                    raise Exception('error in build_interference, unexpected ' + repr(stmt))
-        print(result)
-        p = X86ProgramDefs(result)
+        var = graph.vertices()
+        # print(var)
+        color, var = self.color_graph(graph, var) # call coloring algorithm, get coloring variables
+        # print(color)
+        body = {}
+        for l, ss in p.body.items():
+            instrs = []
+            for i in ss:
+                match i:
+                    case Instr(name, [arg]):
+                        if arg in color:
+                            if color[arg] == 0:
+                                arg = Reg('rcx')
+                            elif color[arg] == 1:
+                                arg = Reg('rbx')
+                            elif color[arg] > 1:
+                                arg = Deref('rbp',-(color[arg]-1)*8)
+                        elif isinstance(arg, Variable):
+                            arg = Reg('rcx')
+                        instrs.append(Instr(name,[arg]))
+                    case Instr(name, [arg1,arg2]):
+                        if arg1 in color:
+                            if color[arg1] == 0:
+                                arg1 = Reg('rcx')
+                            elif color[arg1] == 1:
+                                arg1 = Reg('rbx')
+                            elif color[arg1] > 1:
+                                arg1 = Deref('rbp',-(color[arg1]-1)*8)
+                        elif isinstance(arg1, Variable):
+                            arg1 = Reg('rcx')
+                        if arg2 in color:
+                            if color[arg2] == 0:
+                                arg2 = Reg('rcx')
+                            elif color[arg2] == 1:
+                                arg2 = Reg('rbx')
+                            elif color[arg2] > 1:
+                                arg2 = Deref('rbp',-(color[arg2]-1)*8)
+                        elif isinstance(arg2, Variable):
+                            arg2 = Reg('rcx')
+                        instrs.append(Instr(name,[arg1,arg2]))
+                    case _:
+                        instrs.append(i)                            
+            body[l] = instrs
+        p = X86Program(body)
         setattr(p, 'calleesaved', ['rbx'])
         return p
 
@@ -1201,7 +1160,7 @@ class Compiler:
     # Assign Homes
     ############################################################################
 
-    def assign_homes(self, pseudo_x86: X86ProgramDefs) -> X86ProgramDefs:
+    def assign_homes(self, pseudo_x86: X86Program) -> X86Program:
         # YOUR CODE HERE
         live_after = self.uncover_live(pseudo_x86)
         # for k,v in live_after.items():
@@ -1214,88 +1173,75 @@ class Compiler:
     # Patch Instructions
     ###########################################################################
 
-    def patch_instructions(self, p: X86ProgramDefs) -> X86ProgramDefs:
+    def patch_instructions(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
-        result = []
-        for stmt in p.defs:
-            match stmt:
-                case FunctionDef(fname, params, bod, dl, returns, comment):
-                    body = {}
-                    for l,ss in bod.items():
-                        instrs = []
-                        for i in ss:
-                            match i:
-                                case Instr(name, [deref1, deref2]):
-                                    if name =='movq' and deref1 == deref2:
-                                        pass
-                                    elif isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
-                                        instrs.append(Instr('movq', [deref1,Reg('rax')]))
-                                        instrs.append(Instr(name, [Reg('rax'),deref2]))
-                                    elif name == 'cmpq' and isinstance(deref1, (Immediate,)) and isinstance(deref2, (Immediate,)) :
-                                        instrs.append(Instr('movq', [deref2,Reg('rax')]))
-                                        instrs.append(Instr(name, [deref1,Reg('rax')]))
-                                    else:
-                                        instrs.append(i)
-                                case _:
-                                    instrs.append(i)                            
-                        body[l] = instrs
-                    result.append(FunctionDef(fname, params, body, dl, returns, comment))
-                case _:
-                    raise Exception('error in patch_instructions, unexpected ' + repr(p))
-        print(result)
-        p.defs = result
+        body = {}
+        for l,ss in p.body.items():
+            instrs = []
+            for i in ss:
+                match i:
+                    case Instr(name, [deref1, deref2]):
+                        if name =='movq' and deref1 == deref2:
+                            pass
+                        elif isinstance(deref1, (Deref,)) and isinstance(deref2, (Deref,)) :
+                            instrs.append(Instr('movq', [deref1,Reg('rax')]))
+                            instrs.append(Instr(name, [Reg('rax'),deref2]))
+                        elif name == 'cmpq' and isinstance(deref1, (Immediate,)) and isinstance(deref2, (Immediate,)) :
+                            instrs.append(Instr('movq', [deref2,Reg('rax')]))
+                            instrs.append(Instr(name, [deref1,Reg('rax')]))
+                        else:
+                            instrs.append(i)
+                    case _:
+                        instrs.append(i)                            
+            body[l] = instrs
+        p.body = body
         return p
 
     ###########################################################################
     # Prelude & Conclusion
     ###########################################################################
 
-    def prelude_and_conclusion(self, p: X86ProgramDefs) -> X86Program:
+    def prelude_and_conclusion(self, p: X86Program) -> X86Program:
         # YOUR CODE HERE
+        match p:
+            case X86Program(body):
+                offset = 0
+                for l,ss in body.items():
+                    for j in ss:
+                        match j:
+                            case Instr(name, [deref1,deref2]):
+                                if isinstance(deref1, (Deref,)):
+                                    if deref1.offset < offset:
+                                        offset = deref1.offset
+                                elif isinstance(deref2, (Deref,)) :
+                                    if deref2.offset < offset:
+                                        offset = deref2.offset
+                instrs = []
+                instrs.append(Instr('pushq', [Reg('rbp')]))
+                instrs.append(Instr('movq', [Reg('rsp'),Reg('rbp')]))
+                for j in p.calleesaved:
+                    instrs.append(Instr('pushq', [Reg(j)]))
+                size = math.ceil(-offset / 16)*16 + (len(p.calleesaved)%2)*8
+                instrs.append(Instr('subq', [Immediate(size),Reg('rsp')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
+                instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
+                instrs.append(Callq(label_name("initialize"), 2))
+                instrs.append(Instr('movq', [Global('rootstack_begin'), Reg('r15')]))
+                instrs.append(Instr('movq', [Immediate(0), Deref('r15',0)]))
+                instrs.append(Instr('addq', [Immediate(8), Reg('r15')]))
+                instrs.append(Jump(label_name("start")))
+                body['main'] = instrs
+                body['start'] = body['start'][3:]
+                instrs = []
+                instrs.append(Instr('subq', [Immediate(8),Reg('r15')]))
+                instrs.append(Instr('addq', [Immediate(size),Reg('rsp')]))
+                for j in p.calleesaved:
+                    instrs.append(Instr('popq', [Reg(j)]))
+                instrs.append(Instr('popq', [Reg('rbp')]))
+                instrs.append(Instr('retq', []))
+                body['conclusion'] += instrs
 
-        body = {}
-        for stmt in p.defs:
-            match stmt:
-                case FunctionDef(fname, params, bod, dl, returns, comment):
-                    body.update(bod)
-                    offset = 0
-                    for l,ss in bod.items():
-                        for j in ss:
-                            match j:
-                                case Instr(name, [deref1,deref2]):
-                                    if isinstance(deref1, (Deref,)):
-                                        if deref1.offset < offset:
-                                            offset = deref1.offset
-                                    elif isinstance(deref2, (Deref,)) :
-                                        if deref2.offset < offset:
-                                            offset = deref2.offset
-                    instrs = []
-                    instrs.append(Instr('pushq', [Reg('rbp')]))
-                    instrs.append(Instr('movq', [Reg('rsp'),Reg('rbp')]))
-                    for j in p.calleesaved:
-                        instrs.append(Instr('pushq', [Reg(j)]))
-                    size = math.ceil(-offset / 16)*16 + (len(p.calleesaved)%2)*8
-                    instrs.append(Instr('subq', [Immediate(size),Reg('rsp')]))
-                    if fname == 'main':
-                        instrs.append(Instr('movq', [Immediate(65536), Reg('rdi')]))
-                        instrs.append(Instr('movq', [Immediate(65536), Reg('rsi')]))
-                        instrs.append(Callq(label_name("initialize"), 2))
-                    instrs.append(Instr('movq', [Global('rootstack_begin'), Reg('r15')]))
-                    instrs.append(Instr('movq', [Immediate(0), Deref('r15',0)]))
-                    instrs.append(Instr('addq', [Immediate(8), Reg('r15')]))
-                    instrs.append(Jump(label_name(fname+"_start")))
-                    body[fname] = instrs
-                    body[fname+'_start'].append(Jump(label_name(fname+"_conclusion")))
-                    instrs = []
-                    instrs.append(Instr('subq', [Immediate(8),Reg('r15')]))
-                    instrs.append(Instr('addq', [Immediate(size),Reg('rsp')]))
-                    for j in p.calleesaved:
-                        instrs.append(Instr('popq', [Reg(j)]))
-                    instrs.append(Instr('popq', [Reg('rbp')]))
-                    instrs.append(Instr('retq', []))
-                    body[fname+'_conclusion'] = instrs
-                case _:
-                    raise Exception('error in prelude_and_conclusion, unexpected ' + repr(p))
-
-        return X86Program(body)
+                return X86Program(body)
+            case _:
+                raise Exception('error in prelude_and_conclusion, unexpected ' + repr(p))
 
