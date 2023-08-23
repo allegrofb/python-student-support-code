@@ -39,6 +39,8 @@ def convert_instr(instr):
             return Tree(instr, [convert_arg(arg) for arg in args])
         case Callq(func, args):
             return Tree('callq', [func])
+        case IndirectCallq(func, args):  # try to support IndirectCallq, but failed
+            return Tree('indirect_callq', [func])
         case Jump(label):
             return Tree('jmp', [label])
         case JumpIf(cc, label):

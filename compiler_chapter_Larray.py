@@ -832,7 +832,7 @@ class Compiler:
                         instrs.append(Instr('movq', [self.select_arg(array), Reg('r11')]))
                         instrs.append(Instr('addq', [Immediate(1), self.select_arg(index)]))
                         instrs.append(Instr('imull', [Immediate(8), self.select_arg(index)]))
-                        # interp_x86.eval_x86 didn't support imull ????
+                        # todo, interp_x86.eval_x86 didn't support imull ????
                         instrs.append(Instr('addq', [self.select_arg(index), Reg('r11')]))
                         instrs.append(Instr('movq', [Deref('r11', 0), self.select_arg(arg)]))
                         return instrs

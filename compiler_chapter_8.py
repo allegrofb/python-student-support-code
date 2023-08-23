@@ -142,6 +142,10 @@ class Compiler:
                 return Call(self.reveal_exp(func, func_refs), [self.reveal_exp(i, func_refs) for i in args])
             case Constant(v):
                 return Constant(v)
+            case ast.Tuple(es, Load()):
+                return ast.Tuple([self.reveal_exp(i, func_refs) for i in es], Load())
+            case Subscript(tup, Constant(index), Load()):
+                return Subscript(self.reveal_exp(tup, func_refs), Constant(index), Load())
             case _:
                 raise Exception('error in reveal_exp, unexpected ' + repr(e))
 
@@ -262,22 +266,26 @@ class Compiler:
                 # v[n – 1] = xn–1
                 # v                           //<---------- v tuple varialbe
                 stmts = []
-                ts = []
+                ts = e.has_type.types
+                e_var_list = []
                 ss = []
                 for e in es:
                     tmp = Name(generate_name('tmpVar'))
-                    # breakpoint()
-                    match e:
-                        case Constant(value) if isinstance(value, bool):
-                            ts.append((tmp,BoolType()))
-                        case Constant(value):
-                            ts.append((tmp,IntType()))
-                        case ast.Tuple(value):
-                            ts.append((tmp,e.has_type))
-                            e, ss = self.expose_exp(e)
-                        case _:
-                            raise Exception('error in expose_exp, unexpected ' + repr(e))
+                    # match e:
+                    #     case Constant(value) if isinstance(value, bool):
+                    #         ts.append((tmp,BoolType()))
+                    #     case Constant(value):
+                    #         ts.append((tmp,IntType()))
+                    #     case ast.Tuple(value):
+                    #         ts.append((tmp,e.has_type))
+                    #         e, ss = self.expose_exp(e)
+                    #     case _:
+                    #         breakpoint()
+                    #         # e, ss = self.expose_exp(e)
+                    #         # ts.append((tmp,e.has_type))
+                    #         raise Exception('error in expose_exp, unexpected ' + repr(e))
                     stmts.append(Assign([tmp], e))
+                    e_var_list.append(tmp)
 
                 bytes = Constant(len(ts)*8 + 8)
                 fromspace_end = GlobalValue('fromspace_end')
@@ -287,10 +295,13 @@ class Compiler:
                 stmts.append(If(test,[],orelse))
 
                 v = Name(generate_name('tmpVar'))
-                stmts.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
+                # stmts.append(Assign([v], Allocate(len(ts), TupleType([i[1] for i in ts]))))
+                stmts.append(Assign([v], Allocate(len(ts), TupleType(ts))))
 
-                for index,i in enumerate(ts):
-                    stmts.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
+                # for index,i in enumerate(ts):
+                    # stmts.append(Assign([Subscript(v, Constant(index), Store())], i[0]))
+                for index,i in enumerate(e_var_list):
+                    stmts.append(Assign([Subscript(v, Constant(index), Store())], i))
 
                 return v, ss+stmts
 
@@ -302,6 +313,16 @@ class Compiler:
                     stmts.extend(ss)
                     arguments.append(aa)
                 return Call(FunRef(name, arity), arguments), stmts
+            case FunRef(name, arity):
+                return FunRef(name, arity), []
+            # case Call(Name(name), args):
+            #     stmts = []
+            #     arguments = []
+            #     for arg in args:
+            #         aa, ss = self.expose_exp(arg)
+            #         stmts.extend(ss)
+            #         arguments.append(aa)
+            #     return Call(Name(name), arguments), stmts
             case _:
                 # return e, []
                 raise Exception('error in expose_exp, unexpected ' + repr(e))
@@ -515,6 +536,8 @@ class Compiler:
                 return GlobalValue(name), []
             case Allocate(length, ty):
                 return Allocate(length, ty), []
+            case FunRef(name, arity):
+                return FunRef(name, arity), []
             case Begin(body, result):
                 tmpVars = []
                 stmts = []
@@ -822,6 +845,18 @@ class Compiler:
                         # instrs.append(Callq(label_name(name+'_start'), len(args)))
                         instrs.append(Callq(label_name(name), len(args)))
                         instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
+                        return instrs
+                    case Call(name, args):
+                        param_regs = [Reg(i) for i in 'rdi rsi rdx rcx r8 r9'.split(' ')]
+                        instrs = []
+                        for i,a in enumerate(args):
+                            instrs.append(Instr('movq', [self.select_arg(a), param_regs[i]]))
+                        instrs.append(IndirectCallq(self.select_arg(name), len(args)))       # todo, interp_x86/convert_x86.py, unhandled IndirectCallq(func=Variable(id='f'), num_args=1)
+                        instrs.append(Instr('movq', [Reg('rax'), self.select_arg(arg)]))
+                        return instrs
+                    case FunRef(name, arity):
+                        instrs = []
+                        instrs.append(Instr('leaq', [label_name(name), self.select_arg(arg)]))
                         return instrs
                     case BinOp(left, Add(), right):
                         instrs = []
