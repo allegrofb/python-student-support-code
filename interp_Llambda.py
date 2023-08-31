@@ -51,7 +51,8 @@ class InterpLlambda(InterpLfun):
     
   def interp_stmt(self, s, env, cont):
     match s:
-      case AnnAssign(lhs, typ, value, simple):
+      # case AnnAssign(lhs, typ, value, simple):  # don't have simple in the python 3.10.6 ??
+      case AnnAssign(lhs, typ, value):
         env[lhs.id] = self.interp_exp(value, env)
         return self.interp_stmts(cont, env)
       case Pass():

@@ -98,7 +98,7 @@ class TypeCheckLlambda(TypeCheckLfun):
   def check_stmts(self, ss, return_ty, env):
     if len(ss) == 0:
       return
-    #trace('*** check_stmts ' + repr(ss[0]) + '\n')
+    # trace('*** check_stmts ' + repr(ss[0]) + '\n')
     match ss[0]:
       case FunctionDef(name, params, body, dl, returns, comment):
         #trace('*** tc_check ' + name)
@@ -136,7 +136,8 @@ class TypeCheckLlambda(TypeCheckLfun):
             raise Exception('check_stmts: expected a tuple, not ' \
                             + repr(tup_t))
         self.check_stmts(ss[1:], return_ty, env)
-      case AnnAssign(v, type_annot, value, simple) if isinstance(v, Name):
+      # case AnnAssign(v, type_annot, value, simple) if isinstance(v, Name):  # don't have simple in the python 3.10.6 ??
+      case AnnAssign(v, type_annot, value) if isinstance(v, Name):      
         ty_annot = self.parse_type_annot(type_annot)
         ss[0].annotation = ty_annot
         if v.id in env:
